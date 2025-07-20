@@ -11,8 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 8000
+# Expose port (Railway uses $PORT environment variable)
+EXPOSE $PORT
 
-# Run the simple application first
-CMD ["uvicorn", "simple_main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the simple application with PORT from environment
+CMD uvicorn simple_main:app --host 0.0.0.0 --port $PORT
