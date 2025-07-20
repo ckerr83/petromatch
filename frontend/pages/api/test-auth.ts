@@ -1,7 +1,8 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://intelligent-learning-production.up.railway.app'
+  // Force the correct Railway URL - ignore environment variable for now
+  const API_URL = 'https://intelligent-learning-production.up.railway.app'
   
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
