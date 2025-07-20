@@ -207,6 +207,26 @@ def read_root():
 def health_check():
     return {"status": "healthy"}
 
+@app.get("/debug/scrape-test")
+def debug_scrape_test():
+    """Debug endpoint to test RigZone scraping directly"""
+    try:
+        print("Starting debug scrape test...")
+        jobs = scrape_rigzone_jobs(max_pages=2)  # Test with just 2 pages
+        return {
+            "status": "success", 
+            "jobs_found": len(jobs),
+            "sample_jobs": jobs[:3] if jobs else [],
+            "message": f"Successfully scraped {len(jobs)} jobs from RigZone"
+        }
+    except Exception as e:
+        print(f"Debug scrape test error: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to scrape RigZone"
+        }
+
 @app.post("/auth/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Check if user exists
