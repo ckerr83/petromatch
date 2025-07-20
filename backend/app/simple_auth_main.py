@@ -75,6 +75,14 @@ class CV(Base):
     content = Column(Text)  # Store file content as text
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class LocationPreference(Base):
+    __tablename__ = "location_preferences"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    location = Column(String)  # Asia, Africa, Worldwide, Global, North Sea, UK, etc.
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
@@ -123,6 +131,14 @@ class MatchRequest(BaseModel):
 class CVResponse(BaseModel):
     id: int
     filename: str
+    created_at: str
+
+class LocationPreferenceRequest(BaseModel):
+    locations: List[str]
+
+class LocationPreferenceResponse(BaseModel):
+    id: int
+    location: str
     created_at: str
 
 def get_db():
@@ -292,7 +308,7 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             task_id=task.task_id,
             title="Pipeline Engineer",
             company="Kinder Morgan",
-            location="Denver, CO",
+            location="Denver, CO, USA",
             url="https://kindermorgan.com/job999",
             description="Design and maintain pipeline infrastructure systems. Ensure pipeline integrity and optimize transportation efficiency."
         ),
@@ -300,33 +316,33 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             task_id=task.task_id,
             title="Reservoir Engineer",
             company="ConocoPhillips",
-            location="Houston, TX",
+            location="Kuala Lumpur, Malaysia",
             url="https://conocophillips.com/careers/res001",
-            description="Perform reservoir characterization and simulation studies. Optimize petroleum recovery through advanced reservoir engineering techniques."
+            description="Perform reservoir characterization and simulation studies for Asia-Pacific operations. Optimize petroleum recovery through advanced reservoir engineering techniques."
         ),
         JobListing(
             task_id=task.task_id,
             title="Production Engineer",
             company="Total Energies",
-            location="Aberdeen, UK",
+            location="Aberdeen, UK (North Sea)",
             url="https://totalenergies.com/jobs/prod123",
-            description="Optimize oil and gas production operations. Monitor well performance and implement production enhancement strategies."
+            description="Optimize oil and gas production operations in the North Sea. Monitor well performance and implement production enhancement strategies."
         ),
         JobListing(
             task_id=task.task_id,
             title="Completion Engineer",
             company="Halliburton",
-            location="Calgary, AB",
+            location="Lagos, Nigeria",
             url="https://halliburton.com/careers/comp456",
-            description="Design well completions for offshore and onshore drilling projects. Ensure optimal production through effective completion strategies."
+            description="Design well completions for offshore and onshore drilling projects in West Africa. Ensure optimal production through effective completion strategies."
         ),
         JobListing(
             task_id=task.task_id,
             title="Subsea Engineer",
             company="Technip Energies",
-            location="Houston, TX",
+            location="Singapore",
             url="https://technipenergies.com/jobs/sub789",
-            description="Design and implement subsea production systems for offshore oil and gas fields. Work on deepwater engineering projects."
+            description="Design and implement subsea production systems for offshore oil and gas fields in Asia. Work on deepwater engineering projects."
         ),
         JobListing(
             task_id=task.task_id,
@@ -334,7 +350,7 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             company="Schlumberger",
             location="Dubai, UAE",
             url="https://slb.com/careers/petro001",
-            description="Analyze well logs and core data to characterize petroleum reservoirs. Support drilling and completion operations with geological insights."
+            description="Analyze well logs and core data to characterize petroleum reservoirs across Middle East and Asia. Support drilling and completion operations with geological insights."
         ),
         JobListing(
             task_id=task.task_id,
@@ -342,15 +358,15 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             company="Saudi Aramco",
             location="Dhahran, Saudi Arabia",
             url="https://aramco.com/careers/fac123",
-            description="Design and maintain oil and gas processing facilities. Optimize production facilities and ensure safe operations."
+            description="Design and maintain oil and gas processing facilities. Optimize production facilities and ensure safe operations across global projects."
         ),
         JobListing(
             task_id=task.task_id,
             title="HSE Manager",
             company="Baker Hughes",
-            location="Aberdeen, UK",
+            location="Stavanger, Norway (North Sea)",
             url="https://bakerhughes.com/jobs/hse456",
-            description="Lead health, safety, and environmental initiatives for oil and gas operations. Ensure compliance with industry safety standards."
+            description="Lead health, safety, and environmental initiatives for North Sea oil and gas operations. Ensure compliance with industry safety standards."
         )
     ]
     
@@ -399,6 +415,10 @@ def start_job_matching(request: MatchRequest, current_user: User = Depends(get_c
     if not user_cv:
         raise HTTPException(status_code=400, detail="Please upload your CV first to enable job matching")
     
+    # Get user's location preferences
+    location_preferences = db.query(LocationPreference).filter(LocationPreference.user_id == current_user.id).all()
+    preferred_locations = [pref.location.lower() for pref in location_preferences]
+    
     # Get jobs for this task
     jobs = db.query(JobListing).filter(JobListing.task_id == request.task_id).all()
     if not jobs:
@@ -410,10 +430,10 @@ def start_job_matching(request: MatchRequest, current_user: User = Depends(get_c
     # Analyze CV content and match with jobs
     cv_content = user_cv.content.lower()
     
-    # Create intelligent matches based on CV analysis
+    # Create intelligent matches based on CV analysis and location preferences
     matches_to_create = []
     for job in jobs:
-        score = calculate_match_score(cv_content, job)
+        score = calculate_match_score(cv_content, job, preferred_locations)
         matches_to_create.append((job, score))
     
     # Sort by score (highest first) and take top 10
@@ -436,9 +456,10 @@ def start_job_matching(request: MatchRequest, current_user: User = Depends(get_c
     match_count = db.query(Match).filter(Match.task_id == request.task_id).count()
     return {"message": "Matching completed", "matches_created": match_count}
 
-def calculate_match_score(cv_content: str, job: JobListing) -> float:
-    """Calculate job match score based on CV content and job requirements"""
+def calculate_match_score(cv_content: str, job: JobListing, preferred_locations: List[str] = None) -> float:
+    """Calculate job match score based on CV content, job requirements, and location preferences"""
     job_text = f"{job.title} {job.description} {job.company}".lower()
+    job_location = job.location.lower()
     
     # Define skill keywords and their weights
     technical_skills = {
@@ -478,6 +499,28 @@ def calculate_match_score(cv_content: str, job: JobListing) -> float:
     for location, weight in locations.items():
         if location in cv_content and location in job_text:
             score += weight
+    
+    # Apply location preference matching bonus
+    if preferred_locations:
+        location_match_bonus = 0.0
+        for preferred_location in preferred_locations:
+            # Check for exact matches and partial matches
+            if preferred_location in job_location:
+                location_match_bonus += 0.15
+            elif preferred_location == "worldwide" or preferred_location == "global":
+                # Global/worldwide preference matches any location
+                location_match_bonus += 0.05
+            elif preferred_location == "north sea" and ("north sea" in job_location or "norway" in job_location or "uk" in job_location):
+                location_match_bonus += 0.15
+            elif preferred_location == "asia" and any(country in job_location for country in ["malaysia", "singapore", "china", "japan", "korea", "thailand", "indonesia"]):
+                location_match_bonus += 0.15
+            elif preferred_location == "africa" and any(country in job_location for country in ["nigeria", "angola", "egypt", "ghana", "libya"]):
+                location_match_bonus += 0.15
+            elif preferred_location == "uk" and ("uk" in job_location or "london" in job_location or "aberdeen" in job_location):
+                location_match_bonus += 0.15
+        
+        # Cap location bonus at 0.20
+        score += min(0.20, location_match_bonus)
     
     # Job title specific bonuses
     job_title = job.title.lower()
@@ -576,3 +619,41 @@ def get_user_cv(current_user: User = Depends(get_current_user), db: Session = De
         filename=cv.filename,
         created_at=cv.created_at.isoformat()
     )
+
+# Location Preferences API Endpoints
+@app.post("/user/location-preferences", response_model=List[LocationPreferenceResponse])
+def set_location_preferences(request: LocationPreferenceRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Delete existing location preferences for this user
+    db.query(LocationPreference).filter(LocationPreference.user_id == current_user.id).delete()
+    
+    # Create new location preferences
+    preferences = []
+    for location in request.locations:
+        preference = LocationPreference(
+            user_id=current_user.id,
+            location=location
+        )
+        db.add(preference)
+        preferences.append(preference)
+    
+    db.commit()
+    
+    # Refresh to get IDs and timestamps
+    for pref in preferences:
+        db.refresh(pref)
+    
+    return [LocationPreferenceResponse(
+        id=pref.id,
+        location=pref.location,
+        created_at=pref.created_at.isoformat()
+    ) for pref in preferences]
+
+@app.get("/user/location-preferences", response_model=List[LocationPreferenceResponse])
+def get_location_preferences(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    preferences = db.query(LocationPreference).filter(LocationPreference.user_id == current_user.id).all()
+    
+    return [LocationPreferenceResponse(
+        id=pref.id,
+        location=pref.location,
+        created_at=pref.created_at.isoformat()
+    ) for pref in preferences]

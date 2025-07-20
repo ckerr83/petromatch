@@ -6,6 +6,7 @@ import CVUpload from '../cv/CVUpload'
 import JobScanner from '../jobs/JobScanner'
 import JobMatches from '../jobs/JobMatches'
 import NotificationSettings from './NotificationSettings'
+import LocationPreferences from './LocationPreferences'
 import api from '../../utils/api'
 import toast from 'react-hot-toast'
 import { CV } from '../../types'
@@ -93,12 +94,14 @@ export default function Dashboard() {
           </div>
           
           <div className="space-y-8">
+            <LocationPreferences />
             <NotificationSettings />
             
             <div className="bg-white rounded-lg shadow-md p-6">
               <h3 className="text-lg font-semibold mb-4">Quick Tips</h3>
               <ul className="space-y-2 text-sm text-gray-600">
                 <li>• Upload your CV first to get started</li>
+                <li>• Set your location preferences for better matches</li>
                 <li>• Select relevant job boards for your search</li>
                 <li>• Use the matching feature to find best fits</li>
                 <li>• Tailor your CV for specific positions</li>
