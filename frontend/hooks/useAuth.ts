@@ -13,7 +13,7 @@ export const useAuth = () => {
   }, [])
 
   const login = async (email: string, password: string) => {
-    const formData = new FormData()
+    const formData = new URLSearchParams()
     formData.append('username', email)
     formData.append('password', password)
 
