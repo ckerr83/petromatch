@@ -249,14 +249,63 @@ def get_job_boards(current_user: User = Depends(get_current_user), db: Session =
 @app.post("/jobs/scrape", response_model=ScrapeTaskResponse)
 def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Create a new scrape task
-    task = ScrapeTask(status="pending", user_id=current_user.id)
+    task = ScrapeTask(status="running", user_id=current_user.id)
     db.add(task)
     db.commit()
     db.refresh(task)
     
-    # Simulate starting the scrape - in a real app this would trigger background processing
-    # For demo, we'll create some sample job listings after a delay
-    return ScrapeTaskResponse(task_id=task.task_id, status=task.status)
+    # Create sample job listings immediately for demo
+    sample_jobs = [
+        JobListing(
+            task_id=task.task_id,
+            title="Senior Petroleum Engineer",
+            company="ExxonMobil",
+            location="Houston, TX",
+            url="https://careers.exxonmobil.com/job123",
+            description="Lead reservoir engineering projects and optimize production strategies. Manage drilling operations and work with multidisciplinary teams."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Drilling Engineer",
+            company="Shell",
+            location="Calgary, AB",
+            url="https://shell.com/careers/job456",
+            description="Design and supervise drilling operations for offshore projects. Experience with deepwater drilling and safety protocols required."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Process Engineer",
+            company="Chevron",
+            location="Midland, TX",
+            url="https://chevron.com/jobs/789",
+            description="Optimize refinery processes and ensure safety compliance. Work on process improvement and equipment optimization."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Geophysicist",
+            company="BP",
+            location="London, UK",
+            url="https://bp.com/careers/geo001",
+            description="Analyze seismic data to identify new oil and gas reserves. Use advanced geophysical modeling and interpretation techniques."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Pipeline Engineer",
+            company="Kinder Morgan",
+            location="Denver, CO",
+            url="https://kindermorgan.com/job999",
+            description="Design and maintain pipeline infrastructure systems. Ensure pipeline integrity and optimize transportation efficiency."
+        )
+    ]
+    
+    for job in sample_jobs:
+        db.add(job)
+    
+    # Mark task as completed
+    task.status = "completed"
+    db.commit()
+    
+    return ScrapeTaskResponse(task_id=task.task_id, status="completed")
 
 @app.get("/jobs/status/{task_id}")
 def get_scrape_status(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -264,65 +313,7 @@ def get_scrape_status(task_id: int, current_user: User = Depends(get_current_use
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Simulate task processing
-    if task.status == "pending":
-        # After 5 seconds, mark as running
-        if (datetime.utcnow() - task.created_at).seconds > 5:
-            task.status = "running"
-            db.commit()
-    elif task.status == "running":
-        # After 15 seconds total, mark as completed and create sample jobs
-        if (datetime.utcnow() - task.created_at).seconds > 15:
-            task.status = "completed"
-            
-            # Create sample job listings if they don't exist
-            if db.query(JobListing).filter(JobListing.task_id == task_id).count() == 0:
-                sample_jobs = [
-                    JobListing(
-                        task_id=task_id,
-                        title="Senior Petroleum Engineer",
-                        company="ExxonMobil",
-                        location="Houston, TX",
-                        url="https://careers.exxonmobil.com/job123",
-                        description="Lead reservoir engineering projects and optimize production strategies."
-                    ),
-                    JobListing(
-                        task_id=task_id,
-                        title="Drilling Engineer",
-                        company="Shell",
-                        location="Calgary, AB",
-                        url="https://shell.com/careers/job456",
-                        description="Design and supervise drilling operations for offshore projects."
-                    ),
-                    JobListing(
-                        task_id=task_id,
-                        title="Process Engineer",
-                        company="Chevron",
-                        location="Midland, TX",
-                        url="https://chevron.com/jobs/789",
-                        description="Optimize refinery processes and ensure safety compliance."
-                    ),
-                    JobListing(
-                        task_id=task_id,
-                        title="Geophysicist",
-                        company="BP",
-                        location="London, UK",
-                        url="https://bp.com/careers/geo001",
-                        description="Analyze seismic data to identify new oil and gas reserves."
-                    ),
-                    JobListing(
-                        task_id=task_id,
-                        title="Pipeline Engineer",
-                        company="Kinder Morgan",
-                        location="Denver, CO",
-                        url="https://kindermorgan.com/job999",
-                        description="Design and maintain pipeline infrastructure systems."
-                    )
-                ]
-                for job in sample_jobs:
-                    db.add(job)
-            db.commit()
-    
+    # Since we create jobs immediately now, task should already be completed
     return {"task_id": task.task_id, "status": task.status, "created_at": task.created_at.isoformat()}
 
 @app.get("/jobs/results/{task_id}", response_model=List[JobListingResponse])
