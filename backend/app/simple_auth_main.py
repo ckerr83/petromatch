@@ -438,19 +438,25 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             
             if board.name == "RigZone":
                 # Scrape real RigZone jobs
-                rigzone_jobs = scrape_rigzone_jobs(max_pages=50)  # Scrape 50 pages (~200 jobs) from RigZone
+                print(f"Starting RigZone scraping for task {task.task_id}...")
+                rigzone_jobs = scrape_rigzone_jobs(max_pages=25)  # Scrape 25 pages (~100 jobs) from RigZone
+                print(f"RigZone scraping completed. Found {len(rigzone_jobs)} jobs")
                 
                 for job_data in rigzone_jobs:
-                    job = JobListing(
-                        task_id=task.task_id,
-                        title=job_data['title'],
-                        company=job_data['company'],
-                        location=job_data['location'],
-                        url=job_data['url'],
-                        description=job_data['description']
-                    )
-                    db.add(job)
-                    jobs_created += 1
+                    try:
+                        job = JobListing(
+                            task_id=task.task_id,
+                            title=job_data['title'],
+                            company=job_data['company'],
+                            location=job_data['location'],
+                            url=job_data['url'],
+                            description=job_data['description']
+                        )
+                        db.add(job)
+                        jobs_created += 1
+                    except Exception as e:
+                        print(f"Error creating job listing: {e}")
+                        continue
             else:
                 # For other boards, create some sample jobs for now
                 sample_jobs_data = [
