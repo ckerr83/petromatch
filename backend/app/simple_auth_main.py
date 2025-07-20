@@ -254,7 +254,7 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
     db.commit()
     db.refresh(task)
     
-    # Create sample job listings immediately for demo
+    # Create sample job listings immediately for demo (expanded to 12 jobs)
     sample_jobs = [
         JobListing(
             task_id=task.task_id,
@@ -295,6 +295,62 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             location="Denver, CO",
             url="https://kindermorgan.com/job999",
             description="Design and maintain pipeline infrastructure systems. Ensure pipeline integrity and optimize transportation efficiency."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Reservoir Engineer",
+            company="ConocoPhillips",
+            location="Houston, TX",
+            url="https://conocophillips.com/careers/res001",
+            description="Perform reservoir characterization and simulation studies. Optimize petroleum recovery through advanced reservoir engineering techniques."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Production Engineer",
+            company="Total Energies",
+            location="Aberdeen, UK",
+            url="https://totalenergies.com/jobs/prod123",
+            description="Optimize oil and gas production operations. Monitor well performance and implement production enhancement strategies."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Completion Engineer",
+            company="Halliburton",
+            location="Calgary, AB",
+            url="https://halliburton.com/careers/comp456",
+            description="Design well completions for offshore and onshore drilling projects. Ensure optimal production through effective completion strategies."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Subsea Engineer",
+            company="Technip Energies",
+            location="Houston, TX",
+            url="https://technipenergies.com/jobs/sub789",
+            description="Design and implement subsea production systems for offshore oil and gas fields. Work on deepwater engineering projects."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Petrophysicist",
+            company="Schlumberger",
+            location="Dubai, UAE",
+            url="https://slb.com/careers/petro001",
+            description="Analyze well logs and core data to characterize petroleum reservoirs. Support drilling and completion operations with geological insights."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="Facilities Engineer",
+            company="Saudi Aramco",
+            location="Dhahran, Saudi Arabia",
+            url="https://aramco.com/careers/fac123",
+            description="Design and maintain oil and gas processing facilities. Optimize production facilities and ensure safe operations."
+        ),
+        JobListing(
+            task_id=task.task_id,
+            title="HSE Manager",
+            company="Baker Hughes",
+            location="Aberdeen, UK",
+            url="https://bakerhughes.com/jobs/hse456",
+            description="Lead health, safety, and environmental initiatives for oil and gas operations. Ensure compliance with industry safety standards."
         )
     ]
     
@@ -355,11 +411,18 @@ def start_job_matching(request: MatchRequest, current_user: User = Depends(get_c
     cv_content = user_cv.content.lower()
     
     # Create intelligent matches based on CV analysis
+    matches_to_create = []
     for job in jobs:
         score = calculate_match_score(cv_content, job)
-        
-        # Only create matches with score > 0.5 (50%)
-        if score > 0.5:
+        matches_to_create.append((job, score))
+    
+    # Sort by score (highest first) and take top 10
+    matches_to_create.sort(key=lambda x: x[1], reverse=True)
+    top_matches = matches_to_create[:10]
+    
+    # Create matches for top 10 (with minimum 30% threshold)
+    for job, score in top_matches:
+        if score >= 0.3:  # Lower threshold to ensure we get more matches
             match = Match(
                 task_id=request.task_id,
                 listing_id=job.id,
@@ -379,11 +442,13 @@ def calculate_match_score(cv_content: str, job: JobListing) -> float:
     
     # Define skill keywords and their weights
     technical_skills = {
-        "petroleum": 0.15, "drilling": 0.15, "reservoir": 0.15, "geophysics": 0.15,
-        "pipeline": 0.15, "offshore": 0.12, "refinery": 0.12, "oil": 0.10, "gas": 0.10,
-        "engineering": 0.08, "process": 0.08, "safety": 0.05, "hse": 0.05,
-        "python": 0.08, "matlab": 0.08, "autocad": 0.06, "solidworks": 0.06,
-        "project management": 0.08, "leadership": 0.05, "analysis": 0.05
+        "petroleum": 0.12, "drilling": 0.12, "reservoir": 0.12, "geophysics": 0.12,
+        "pipeline": 0.12, "offshore": 0.10, "refinery": 0.10, "oil": 0.08, "gas": 0.08,
+        "engineering": 0.06, "process": 0.08, "safety": 0.04, "hse": 0.04,
+        "python": 0.06, "matlab": 0.06, "autocad": 0.04, "solidworks": 0.04,
+        "project management": 0.06, "leadership": 0.04, "analysis": 0.04,
+        "production": 0.08, "completion": 0.08, "subsea": 0.10, "petrophysics": 0.10,
+        "facilities": 0.06, "simulation": 0.06, "optimization": 0.04, "operations": 0.06
     }
     
     experience_levels = {
@@ -396,8 +461,8 @@ def calculate_match_score(cv_content: str, job: JobListing) -> float:
         "norway": 0.04, "uk": 0.03, "texas": 0.05, "alberta": 0.05
     }
     
-    # Calculate base score
-    score = 0.5  # Base compatibility
+    # Calculate base score (lower base to create more variety)
+    score = 0.3  # Base compatibility
     
     # Check technical skills match
     for skill, weight in technical_skills.items():
@@ -433,8 +498,8 @@ def calculate_match_score(cv_content: str, job: JobListing) -> float:
         if company in cv_content and company in job.company.lower():
             score += 0.05
     
-    # Cap the score at 0.95 and ensure minimum
-    return min(0.95, max(0.5, round(score, 2)))
+    # Cap the score at 0.95 and ensure minimum of 0.3
+    return min(0.95, max(0.3, round(score, 2)))
 
 @app.get("/jobs/matches/{task_id}", response_model=List[MatchResponse])
 def get_job_matches(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
