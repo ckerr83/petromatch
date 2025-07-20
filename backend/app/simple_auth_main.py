@@ -347,24 +347,103 @@ def start_job_matching(request: MatchRequest, current_user: User = Depends(get_c
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Create AI matches with random scores for demo
+    # Get user's CV for analysis
+    user_cv = db.query(CV).filter(CV.user_id == current_user.id).first()
+    if not user_cv:
+        raise HTTPException(status_code=400, detail="Please upload your CV first to enable job matching")
+    
+    # Get jobs for this task
     jobs = db.query(JobListing).filter(JobListing.task_id == request.task_id).all()
+    if not jobs:
+        raise HTTPException(status_code=404, detail="No jobs found for this task")
     
     # Clear existing matches
     db.query(Match).filter(Match.task_id == request.task_id).delete()
     
-    # Create new matches with scores
+    # Analyze CV content and match with jobs
+    cv_content = user_cv.content.lower()
+    
+    # Create intelligent matches based on CV analysis
     for job in jobs:
-        score = round(random.uniform(0.6, 0.95), 2)  # Demo scores between 60-95%
-        match = Match(
-            task_id=request.task_id,
-            listing_id=job.id,
-            score=score
-        )
-        db.add(match)
+        score = calculate_match_score(cv_content, job)
+        
+        # Only create matches with score > 0.5 (50%)
+        if score > 0.5:
+            match = Match(
+                task_id=request.task_id,
+                listing_id=job.id,
+                score=score
+            )
+            db.add(match)
     
     db.commit()
-    return {"message": "Matching completed", "matches_created": len(jobs)}
+    
+    # Count created matches
+    match_count = db.query(Match).filter(Match.task_id == request.task_id).count()
+    return {"message": "Matching completed", "matches_created": match_count}
+
+def calculate_match_score(cv_content: str, job: JobListing) -> float:
+    """Calculate job match score based on CV content and job requirements"""
+    job_text = f"{job.title} {job.description} {job.company}".lower()
+    
+    # Define skill keywords and their weights
+    technical_skills = {
+        "petroleum": 0.15, "drilling": 0.15, "reservoir": 0.15, "geophysics": 0.15,
+        "pipeline": 0.15, "offshore": 0.12, "refinery": 0.12, "oil": 0.10, "gas": 0.10,
+        "engineering": 0.08, "process": 0.08, "safety": 0.05, "hse": 0.05,
+        "python": 0.08, "matlab": 0.08, "autocad": 0.06, "solidworks": 0.06,
+        "project management": 0.08, "leadership": 0.05, "analysis": 0.05
+    }
+    
+    experience_levels = {
+        "senior": 0.10, "lead": 0.10, "principal": 0.12, "manager": 0.15,
+        "director": 0.18, "engineer": 0.05, "analyst": 0.03, "graduate": 0.02
+    }
+    
+    locations = {
+        "houston": 0.05, "calgary": 0.05, "london": 0.03, "dubai": 0.03,
+        "norway": 0.04, "uk": 0.03, "texas": 0.05, "alberta": 0.05
+    }
+    
+    # Calculate base score
+    score = 0.5  # Base compatibility
+    
+    # Check technical skills match
+    for skill, weight in technical_skills.items():
+        if skill in cv_content and skill in job_text:
+            score += weight
+    
+    # Check experience level match
+    for level, weight in experience_levels.items():
+        if level in cv_content and level in job_text:
+            score += weight
+    
+    # Check location preference (if mentioned in CV)
+    for location, weight in locations.items():
+        if location in cv_content and location in job_text:
+            score += weight
+    
+    # Job title specific bonuses
+    job_title = job.title.lower()
+    if "petroleum" in cv_content and "petroleum" in job_title:
+        score += 0.1
+    if "drilling" in cv_content and "drilling" in job_title:
+        score += 0.1
+    if "process" in cv_content and "process" in job_title:
+        score += 0.1
+    if "pipeline" in cv_content and "pipeline" in job_title:
+        score += 0.1
+    if "geophysics" in cv_content and ("geophysics" in job_title or "geophysicist" in job_title):
+        score += 0.1
+    
+    # Company match bonus
+    company_names = ["exxonmobil", "shell", "chevron", "bp", "total", "conocophillips"]
+    for company in company_names:
+        if company in cv_content and company in job.company.lower():
+            score += 0.05
+    
+    # Cap the score at 0.95 and ensure minimum
+    return min(0.95, max(0.5, round(score, 2)))
 
 @app.get("/jobs/matches/{task_id}", response_model=List[MatchResponse])
 def get_job_matches(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
