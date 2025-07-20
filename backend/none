@@ -1,0 +1,13 @@
+t=2025-07-20T15:08:34+0700 lvl=info msg="no configuration paths supplied"
+t=2025-07-20T15:08:34+0700 lvl=info msg="ignoring default config path, could not stat it" path="/Users/chriskerr/Library/Application Support/ngrok/ngrok.yml"
+t=2025-07-20T15:08:34+0700 lvl=info msg="starting web service" obj=web addr=127.0.0.1:4040 allow_hosts=[]
+t=2025-07-20T15:08:35+0700 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to send authentication request: tls: failed to verify certificate: x509: certificate signed by unknown authority"
+t=2025-07-20T15:08:35+0700 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to send authentication request: tls: failed to verify certificate: x509: certificate signed by unknown authority"
+t=2025-07-20T15:08:36+0700 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to send authentication request: tls: failed to verify certificate: x509: certificate signed by unknown authority"
+t=2025-07-20T15:08:38+0700 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to send authentication request: tls: failed to verify certificate: x509: certificate signed by unknown authority"
+t=2025-07-20T15:08:42+0700 lvl=info msg=start pg=/api/tunnels id=fee78c235385b917
+t=2025-07-20T15:08:42+0700 lvl=info msg=end pg=/api/tunnels id=fee78c235385b917 status=200 dur=655.375µs
+t=2025-07-20T15:08:42+0700 lvl=eror msg="failed to reconnect session" obj=tunnels.session err="failed to send authentication request: tls: failed to verify certificate: x509: certificate signed by unknown authority"
+t=2025-07-20T15:08:45+0700 lvl=info msg="received stop request" obj=app stopReq="{err:<nil> restart:false}"
+t=2025-07-20T15:08:45+0700 lvl=info msg="session closing" obj=tunnels.session err=nil
+t=2025-07-20T15:08:45+0700 lvl=info msg="no more state changes" obj=tunnels.session

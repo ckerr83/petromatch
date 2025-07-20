@@ -1,0 +1,172 @@
+from celery import Celery
+from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
+try:
+    from croniter import croniter
+except ImportError:
+    print("Warning: croniter not available, email scheduling disabled")
+    croniter = None
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+from ..core.database import SessionLocal
+from ..core.config import settings
+from ..models.email_notification import EmailNotification
+from ..models.match import Match
+from ..models.user import User
+from .celery_app import celery_app
+
+@celery_app.task
+def send_scheduled_emails():
+    db = SessionLocal()
+    try:
+        notifications = db.query(EmailNotification).all()
+        
+        for notification in notifications:
+            try:
+                # Check if it's time to send
+                if should_send_email(notification):
+                    send_email_notification(notification.user_id, db)
+                    notification.last_sent = datetime.utcnow()
+                    db.commit()
+            except Exception as e:
+                print(f"Error sending email for user {notification.user_id}: {str(e)}")
+                continue
+        
+        return {"notifications_processed": len(notifications)}
+        
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+def should_send_email(notification: EmailNotification) -> bool:
+    if croniter is None:
+        return False
+        
+    if not notification.last_sent:
+        return True
+    
+    cron = croniter(notification.cron_schedule, notification.last_sent)
+    next_run = cron.get_next(datetime)
+    
+    return datetime.utcnow() >= next_run
+
+def send_email_notification(user_id: int, db: Session):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return
+    
+    # Get recent matches (last 24 hours)
+    since = datetime.utcnow() - timedelta(hours=24)
+    matches = db.query(Match).join(Match.task).filter(
+        Match.task.has(user_id=user_id),
+        Match.matched_at >= since
+    ).order_by(Match.score.desc()).limit(10).all()
+    
+    if not matches:
+        return
+    
+    # Create HTML email
+    html_content = create_email_html(matches)
+    
+    if settings.SENDGRID_API_KEY:
+        send_with_sendgrid(user.email, html_content)
+    elif settings.SMTP_SERVER:
+        send_with_smtp(user.email, html_content)
+
+def create_email_html(matches) -> str:
+    html = """
+    <html>
+    <head>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .header { background-color: #2c3e50; color: white; padding: 20px; text-align: center; }
+            .match { border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 5px; }
+            .score { background-color: #3498db; color: white; padding: 5px 10px; border-radius: 3px; font-weight: bold; }
+            .company { color: #2c3e50; font-weight: bold; }
+            .location { color: #7f8c8d; }
+            .description { margin-top: 10px; color: #34495e; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>PetroMatch - New Job Matches</h1>
+            <p>We found some great opportunities for you!</p>
+        </div>
+        
+        <div style="margin: 20px 0;">
+            <h2>Your Top Matches</h2>
+    """
+    
+    for match in matches:
+        job = match.listing
+        html += f"""
+            <div class="match">
+                <div style="display: flex; justify-content: space-between; align-items: start;">
+                    <div>
+                        <h3>{job.title}</h3>
+                        <p class="company">{job.company}</p>
+                        <p class="location">{job.location}</p>
+                    </div>
+                    <span class="score">{match.score:.0%} Match</span>
+                </div>
+                <div class="description">
+                    {job.description[:200]}...
+                </div>
+                <div style="margin-top: 10px;">
+                    <a href="{job.url}" style="background-color: #e74c3c; color: white; padding: 8px 16px; text-decoration: none; border-radius: 3px;">Apply Now</a>
+                </div>
+            </div>
+        """
+    
+    html += """
+        </div>
+        
+        <div style="margin-top: 30px; text-align: center; color: #7f8c8d;">
+            <p>This email was sent by PetroMatch. To update your notification preferences, please log in to your account.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html
+
+def send_with_sendgrid(to_email: str, html_content: str):
+    message = Mail(
+        from_email='noreply@petromatch.com',
+        to_emails=to_email,
+        subject='PetroMatch - New Job Matches',
+        html_content=html_content
+    )
+    
+    try:
+        sg = SendGridAPIClient(settings.SENDGRID_API_KEY)
+        response = sg.send(message)
+        print(f"Email sent successfully to {to_email}")
+    except Exception as e:
+        print(f"Error sending email with SendGrid: {str(e)}")
+
+def send_with_smtp(to_email: str, html_content: str):
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = 'PetroMatch - New Job Matches'
+        msg['From'] = settings.SMTP_USERNAME
+        msg['To'] = to_email
+        
+        html_part = MIMEText(html_content, 'html')
+        msg.attach(html_part)
+        
+        server = smtplib.SMTP(settings.SMTP_SERVER, settings.SMTP_PORT)
+        server.starttls()
+        server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+        
+        server.send_message(msg)
+        server.quit()
+        
+        print(f"Email sent successfully to {to_email}")
+        
+    except Exception as e:
+        print(f"Error sending email with SMTP: {str(e)}")

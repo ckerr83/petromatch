@@ -1,0 +1,17 @@
+<svg width="500" height="120" viewBox="0 0 500 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Main oil drop shape - dark navy blue -->
+  <path d="M30 75 C30 90, 40 100, 55 100 C70 100, 80 90, 80 75 C80 68, 78 61, 75 54 C72 47, 68 40, 64 33 C60 26, 56 19, 53 12 C52 9, 51 6, 50 4 C49 6, 48 9, 47 12 C44 19, 40 26, 36 33 C32 40, 28 47, 25 54 C22 61, 20 68, 20 75 C20 90, 30 100, 55 100 C70 100, 80 90, 80 75 Z" 
+        fill="#2c3e50"/>
+  
+  <!-- Orange accent section -->
+  <path d="M55 25 C59 30, 62 36, 64 42 C66 48, 67 54, 67 60 C67 70, 62 78, 55 78 C48 78, 43 70, 43 60 C43 54, 44 48, 46 42 C48 36, 51 30, 55 25 Z" 
+        fill="#e74c3c"/>
+  
+  <!-- White checkmark -->
+  <path d="M47 58 L52 63 L63 52" stroke="white" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- PetroMatch text -->
+  <text x="100" y="75" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="42" font-weight="700" fill="#2c3e50">
+    PetroMatch
+  </text>
+</svg>

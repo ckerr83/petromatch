@@ -1,0 +1,8 @@
+[
+  {
+    "name": "RigZone",
+    "login_required": false,
+    "base_url": "https://www.rigzone.com",
+    "selectors_json": "{\"use_playwright\": true, \"jobs_page_url\": \"https://www.rigzone.com/oil/jobs/search/?sk=nes\", \"job_container\": \".job-listing\", \"title_selector\": \".job-title a\", \"company_selector\": \".company-name\", \"location_selector\": \".job-location\", \"url_selector\": \".job-title a\", \"description_selector\": \".job-description\"}"
+  }
+]
