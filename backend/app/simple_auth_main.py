@@ -254,7 +254,7 @@ def seed_job_boards(db: Session):
 with SessionLocal() as db:
     seed_job_boards(db)
 
-def scrape_rigzone_jobs(max_pages: int = 5) -> List[dict]:
+def scrape_rigzone_jobs(max_pages: int = 20) -> List[dict]:
     """Scrape jobs from RigZone with pagination support"""
     jobs = []
     base_url = "https://www.rigzone.com/oil/jobs/search/"
@@ -267,10 +267,11 @@ def scrape_rigzone_jobs(max_pages: int = 5) -> List[dict]:
         for page in range(1, max_pages + 1):
             print(f"Scraping RigZone page {page}...")
             
-            # Construct URL with page parameter
-            url = f"{base_url}?page={page}" if page > 1 else base_url
+            # Construct URL with page parameter  
+            url = f"{base_url}?page={page}"
+            print(f"Fetching URL: {url}")
             
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -278,8 +279,10 @@ def scrape_rigzone_jobs(max_pages: int = 5) -> List[dict]:
             # Find job listings using the structure we identified
             job_articles = soup.find_all('article', class_='update-block')
             
+            print(f"Found {len(job_articles)} job articles on page {page}")
+            
             if not job_articles:
-                print(f"No job articles found on page {page}")
+                print(f"No job articles found on page {page}, stopping pagination")
                 break
                 
             for article in job_articles:
@@ -373,8 +376,9 @@ def scrape_rigzone_jobs(max_pages: int = 5) -> List[dict]:
             
             print(f"Found {len(job_articles)} job articles on page {page}")
             
-            # Add small delay between requests to be respectful
-            time.sleep(1)
+            # Only add delay if we're getting good results
+            if len(job_articles) > 0:
+                time.sleep(2)  # Be more respectful with longer delay
             
     except Exception as e:
         print(f"Error scraping RigZone: {e}")
@@ -414,7 +418,7 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             
             if board.name == "RigZone":
                 # Scrape real RigZone jobs
-                rigzone_jobs = scrape_rigzone_jobs(max_pages=5)  # Scrape 5 pages for more jobs (~100+)
+                rigzone_jobs = scrape_rigzone_jobs(max_pages=20)  # Scrape 20 pages for hundreds of jobs
                 
                 for job_data in rigzone_jobs:
                     job = JobListing(
