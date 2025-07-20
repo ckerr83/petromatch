@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, HTTPBearer
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float
@@ -66,6 +66,15 @@ class Match(Base):
     score = Column(Float)
     matched_at = Column(DateTime, default=datetime.utcnow)
 
+class CV(Base):
+    __tablename__ = "cvs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    filename = Column(String)
+    content = Column(Text)  # Store file content as text
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # Create tables
 Base.metadata.create_all(bind=engine)
 
@@ -110,6 +119,11 @@ class ScrapeRequest(BaseModel):
 
 class MatchRequest(BaseModel):
     task_id: int
+
+class CVResponse(BaseModel):
+    id: int
+    filename: str
+    created_at: str
 
 def get_db():
     db = SessionLocal()
@@ -376,3 +390,54 @@ def get_job_matches(task_id: int, current_user: User = Depends(get_current_user)
         ))
     
     return results
+
+# CV Upload API Endpoints
+@app.post("/user/cv", response_model=CVResponse)
+async def upload_cv(file: UploadFile = File(...), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Validate file type
+    allowed_types = ['text/plain', 'application/pdf', 'application/msword', 
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="File type not supported. Please upload .txt, .pdf, .doc, or .docx files.")
+    
+    # Read file content
+    content = await file.read()
+    
+    # For demo purposes, store as text (in production, you'd handle different file types properly)
+    if file.content_type == 'text/plain':
+        file_content = content.decode('utf-8')
+    else:
+        # For demo, just store filename for non-text files
+        file_content = f"File content: {file.filename} ({file.content_type})"
+    
+    # Delete existing CV for this user
+    db.query(CV).filter(CV.user_id == current_user.id).delete()
+    
+    # Create new CV record
+    cv = CV(
+        user_id=current_user.id,
+        filename=file.filename,
+        content=file_content
+    )
+    db.add(cv)
+    db.commit()
+    db.refresh(cv)
+    
+    return CVResponse(
+        id=cv.id,
+        filename=cv.filename,
+        created_at=cv.created_at.isoformat()
+    )
+
+@app.get("/user/cv", response_model=CVResponse)
+def get_user_cv(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cv = db.query(CV).filter(CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=404, detail="No CV found")
+    
+    return CVResponse(
+        id=cv.id,
+        filename=cv.filename,
+        created_at=cv.created_at.isoformat()
+    )
