@@ -212,7 +212,7 @@ def debug_scrape_test():
     """Debug endpoint to test RigZone scraping directly"""
     try:
         print("Starting debug scrape test...")
-        jobs = scrape_rigzone_jobs(max_pages=2)  # Test with just 2 pages
+        jobs = scrape_rigzone_jobs(max_pages=10)  # Test with 10 pages (40 jobs)
         return {
             "status": "success", 
             "jobs_found": len(jobs),
@@ -274,7 +274,7 @@ def seed_job_boards(db: Session):
 with SessionLocal() as db:
     seed_job_boards(db)
 
-def scrape_rigzone_jobs(max_pages: int = 20) -> List[dict]:
+def scrape_rigzone_jobs(max_pages: int = 100) -> List[dict]:
     """Scrape jobs from RigZone with pagination support"""
     jobs = []
     base_url = "https://www.rigzone.com/oil/jobs/search/"
@@ -438,7 +438,7 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             
             if board.name == "RigZone":
                 # Scrape real RigZone jobs
-                rigzone_jobs = scrape_rigzone_jobs(max_pages=20)  # Scrape 20 pages for hundreds of jobs
+                rigzone_jobs = scrape_rigzone_jobs(max_pages=50)  # Scrape 50 pages (~200 jobs) from RigZone
                 
                 for job_data in rigzone_jobs:
                     job = JobListing(
