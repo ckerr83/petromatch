@@ -12,6 +12,9 @@ from typing import List, Optional
 import os
 import time
 import random
+import requests
+from bs4 import BeautifulSoup
+import re
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./petromatch.db")
@@ -251,6 +254,112 @@ def seed_job_boards(db: Session):
 with SessionLocal() as db:
     seed_job_boards(db)
 
+def scrape_rigzone_jobs(max_pages: int = 5) -> List[dict]:
+    """Scrape jobs from RigZone with pagination support"""
+    jobs = []
+    base_url = "https://www.rigzone.com/oil/jobs/search/"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        for page in range(1, max_pages + 1):
+            print(f"Scraping RigZone page {page}...")
+            
+            # Construct URL with page parameter
+            url = f"{base_url}?page={page}" if page > 1 else base_url
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Find job listings using the structure we identified
+            job_articles = soup.find_all('article', class_='update-block')
+            
+            if not job_articles:
+                print(f"No job articles found on page {page}")
+                break
+                
+            for article in job_articles:
+                try:
+                    # Extract job title and URL
+                    heading = article.find('div', class_='heading')
+                    if not heading:
+                        continue
+                        
+                    title_link = heading.find('h3').find('a') if heading.find('h3') else None
+                    if not title_link:
+                        continue
+                        
+                    title = title_link.get_text(strip=True)
+                    job_url = title_link.get('href', '')
+                    
+                    # Make URL absolute if relative
+                    if job_url.startswith('/'):
+                        job_url = f"https://www.rigzone.com{job_url}"
+                    
+                    # Extract company and location from address
+                    address = heading.find('address')
+                    if not address:
+                        continue
+                        
+                    address_text = address.get_text(strip=True)
+                    # Try to split company and location
+                    address_parts = [part.strip() for part in address_text.split('\n') if part.strip()]
+                    
+                    company = address_parts[0] if address_parts else "Unknown Company"
+                    location = address_parts[1] if len(address_parts) > 1 else "Location not specified"
+                    
+                    # Extract job details from footer
+                    footer = article.find('footer', class_='details')
+                    experience = ""
+                    skills = ""
+                    
+                    if footer:
+                        exp_span = footer.find('span', class_='experience')
+                        if exp_span:
+                            experience = exp_span.get_text(strip=True)
+                            
+                        resp_span = footer.find('span', class_='responsibility')
+                        if resp_span:
+                            skills = resp_span.get_text(strip=True)
+                    
+                    # Build description
+                    description_parts = []
+                    if experience:
+                        description_parts.append(f"Experience: {experience}")
+                    if skills:
+                        description_parts.append(f"Skills: {skills}")
+                    
+                    description = " | ".join(description_parts) if description_parts else "Job details available on RigZone."
+                    
+                    # Only add jobs with valid titles and URLs
+                    if title and job_url:
+                        jobs.append({
+                            'title': title,
+                            'company': company,
+                            'location': location,
+                            'url': job_url,
+                            'description': description
+                        })
+                        
+                except Exception as e:
+                    print(f"Error parsing job article: {e}")
+                    continue
+            
+            print(f"Found {len(job_articles)} job articles on page {page}")
+            
+            # Add small delay between requests to be respectful
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Error scraping RigZone: {e}")
+    
+    print(f"Total jobs scraped from RigZone: {len(jobs)}")
+    return jobs
+
 # Job Board API Endpoints
 @app.get("/jobs/boards", response_model=List[JobBoardResponse])
 def get_job_boards(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -270,114 +379,75 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
     db.commit()
     db.refresh(task)
     
-    # Create sample job listings immediately for demo (expanded to 12 jobs)
-    sample_jobs = [
-        JobListing(
-            task_id=task.task_id,
-            title="Senior Petroleum Engineer",
-            company="ExxonMobil",
-            location="Houston, TX",
-            url="https://careers.exxonmobil.com/job123",
-            description="Lead reservoir engineering projects and optimize production strategies. Manage drilling operations and work with multidisciplinary teams."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Drilling Engineer",
-            company="Shell",
-            location="Calgary, AB",
-            url="https://shell.com/careers/job456",
-            description="Design and supervise drilling operations for offshore projects. Experience with deepwater drilling and safety protocols required."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Process Engineer",
-            company="Chevron",
-            location="Midland, TX",
-            url="https://chevron.com/jobs/789",
-            description="Optimize refinery processes and ensure safety compliance. Work on process improvement and equipment optimization."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Geophysicist",
-            company="BP",
-            location="London, UK",
-            url="https://bp.com/careers/geo001",
-            description="Analyze seismic data to identify new oil and gas reserves. Use advanced geophysical modeling and interpretation techniques."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Pipeline Engineer",
-            company="Kinder Morgan",
-            location="Denver, CO, USA",
-            url="https://kindermorgan.com/job999",
-            description="Design and maintain pipeline infrastructure systems. Ensure pipeline integrity and optimize transportation efficiency."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Reservoir Engineer",
-            company="ConocoPhillips",
-            location="Kuala Lumpur, Malaysia",
-            url="https://conocophillips.com/careers/res001",
-            description="Perform reservoir characterization and simulation studies for Asia-Pacific operations. Optimize petroleum recovery through advanced reservoir engineering techniques."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Production Engineer",
-            company="Total Energies",
-            location="Aberdeen, UK (North Sea)",
-            url="https://totalenergies.com/jobs/prod123",
-            description="Optimize oil and gas production operations in the North Sea. Monitor well performance and implement production enhancement strategies."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Completion Engineer",
-            company="Halliburton",
-            location="Lagos, Nigeria",
-            url="https://halliburton.com/careers/comp456",
-            description="Design well completions for offshore and onshore drilling projects in West Africa. Ensure optimal production through effective completion strategies."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Subsea Engineer",
-            company="Technip Energies",
-            location="Singapore",
-            url="https://technipenergies.com/jobs/sub789",
-            description="Design and implement subsea production systems for offshore oil and gas fields in Asia. Work on deepwater engineering projects."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Petrophysicist",
-            company="Schlumberger",
-            location="Dubai, UAE",
-            url="https://slb.com/careers/petro001",
-            description="Analyze well logs and core data to characterize petroleum reservoirs across Middle East and Asia. Support drilling and completion operations with geological insights."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="Facilities Engineer",
-            company="Saudi Aramco",
-            location="Dhahran, Saudi Arabia",
-            url="https://aramco.com/careers/fac123",
-            description="Design and maintain oil and gas processing facilities. Optimize production facilities and ensure safe operations across global projects."
-        ),
-        JobListing(
-            task_id=task.task_id,
-            title="HSE Manager",
-            company="Baker Hughes",
-            location="Stavanger, Norway (North Sea)",
-            url="https://bakerhughes.com/jobs/hse456",
-            description="Lead health, safety, and environmental initiatives for North Sea oil and gas operations. Ensure compliance with industry safety standards."
-        )
-    ]
+    try:
+        jobs_created = 0
+        
+        # Check which boards to scrape
+        for board_id in request.board_ids:
+            board = db.query(JobBoard).filter(JobBoard.id == board_id).first()
+            if not board:
+                continue
+                
+            print(f"Scraping jobs from {board.name}...")
+            
+            if board.name == "RigZone":
+                # Scrape real RigZone jobs
+                rigzone_jobs = scrape_rigzone_jobs(max_pages=3)  # Scrape 3 pages for good amount of jobs
+                
+                for job_data in rigzone_jobs:
+                    job = JobListing(
+                        task_id=task.task_id,
+                        title=job_data['title'],
+                        company=job_data['company'],
+                        location=job_data['location'],
+                        url=job_data['url'],
+                        description=job_data['description']
+                    )
+                    db.add(job)
+                    jobs_created += 1
+            else:
+                # For other boards, create some sample jobs for now
+                sample_jobs_data = [
+                    {
+                        'title': f"Senior Petroleum Engineer - {board.name}",
+                        'company': "Major Oil Company",
+                        'location': "Houston, TX",
+                        'url': f"{board.base_url}/job123",
+                        'description': f"Engineering position from {board.name}. Experience with petroleum engineering and project management required."
+                    },
+                    {
+                        'title': f"Drilling Engineer - {board.name}",
+                        'company': "International Energy Corp",
+                        'location': "Calgary, AB",
+                        'url': f"{board.base_url}/job456",
+                        'description': f"Drilling engineering role from {board.name}. Offshore drilling experience preferred."
+                    }
+                ]
+                
+                for job_data in sample_jobs_data:
+                    job = JobListing(
+                        task_id=task.task_id,
+                        title=job_data['title'],
+                        company=job_data['company'],
+                        location=job_data['location'],
+                        url=job_data['url'],
+                        description=job_data['description']
+                    )
+                    db.add(job)
+                    jobs_created += 1
+        
+        # Mark task as completed
+        task.status = "completed"
+        db.commit()
+        
+        print(f"Scraping completed. Created {jobs_created} jobs for task {task.task_id}")
+        
+    except Exception as e:
+        print(f"Error during scraping: {e}")
+        task.status = "failed"
+        db.commit()
     
-    for job in sample_jobs:
-        db.add(job)
-    
-    # Mark task as completed
-    task.status = "completed"
-    db.commit()
-    
-    return ScrapeTaskResponse(task_id=task.task_id, status="completed")
+    return ScrapeTaskResponse(task_id=task.task_id, status=task.status)
 
 @app.get("/jobs/status/{task_id}")
 def get_scrape_status(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
