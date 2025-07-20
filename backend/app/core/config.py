@@ -1,14 +1,15 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+import os
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/petromatch"
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./petromatch.db")
     REDIS_URL: str = "redis://localhost:6379"
-    SECRET_KEY: str = "your-secret-key-here"
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
-    OPENAI_API_KEY: str
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", "")
     
     SENDGRID_API_KEY: Optional[str] = None
     SMTP_SERVER: Optional[str] = None

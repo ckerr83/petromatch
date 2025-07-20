@@ -15,4 +15,4 @@ COPY . .
 EXPOSE $PORT
 
 # Run the simple application with PORT from environment
-CMD uvicorn app.main:app --host 0.0.0.0 --port $PORT
+CMD uvicorn app.simple_auth_main:app --host 0.0.0.0 --port $PORT
