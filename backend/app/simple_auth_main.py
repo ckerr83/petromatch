@@ -309,8 +309,30 @@ def scrape_rigzone_jobs(max_pages: int = 5) -> List[dict]:
                     # Try to split company and location
                     address_parts = [part.strip() for part in address_text.split('\n') if part.strip()]
                     
-                    company = address_parts[0] if address_parts else "Unknown Company"
-                    location = address_parts[1] if len(address_parts) > 1 else "Location not specified"
+                    if address_parts:
+                        # Often RigZone combines company and location in one line
+                        full_text = address_parts[0]
+                        
+                        # Try to extract location from the end of the company text
+                        # Look for patterns like "CompanyNameCity, State, Country"
+                        location_match = re.search(r'([A-Za-z\s]+),\s*([A-Z]{2}),\s*([A-Za-z\s]+)$', full_text)
+                        if location_match:
+                            city, state, country = location_match.groups()
+                            location = f"{city.strip()}, {state.strip()}, {country.strip()}"
+                            company = full_text.replace(location_match.group(0), '').strip()
+                        else:
+                            # Try simpler pattern "CompanyCity, Country"
+                            location_match = re.search(r'([A-Za-z\s]+),\s*([A-Za-z\s]+)$', full_text)
+                            if location_match and len(location_match.group(2).strip()) > 2:
+                                city, country = location_match.groups()
+                                location = f"{city.strip()}, {country.strip()}"
+                                company = full_text.replace(location_match.group(0), '').strip()
+                            else:
+                                company = full_text
+                                location = "Location not specified"
+                    else:
+                        company = "Unknown Company"
+                        location = "Location not specified"
                     
                     # Extract job details from footer
                     footer = article.find('footer', class_='details')
@@ -392,7 +414,7 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             
             if board.name == "RigZone":
                 # Scrape real RigZone jobs
-                rigzone_jobs = scrape_rigzone_jobs(max_pages=3)  # Scrape 3 pages for good amount of jobs
+                rigzone_jobs = scrape_rigzone_jobs(max_pages=5)  # Scrape 5 pages for more jobs (~100+)
                 
                 for job_data in rigzone_jobs:
                     job = JobListing(
