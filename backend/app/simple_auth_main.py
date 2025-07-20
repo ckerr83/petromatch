@@ -510,13 +510,17 @@ def calculate_match_score(cv_content: str, job: JobListing, preferred_locations:
             elif preferred_location == "worldwide" or preferred_location == "global":
                 # Global/worldwide preference matches any location
                 location_match_bonus += 0.05
-            elif preferred_location == "north sea" and ("north sea" in job_location or "norway" in job_location or "uk" in job_location):
+            elif preferred_location == "asia" and any(country in job_location for country in ["malaysia", "singapore", "china", "japan", "korea", "thailand", "indonesia", "dubai", "uae"]):
                 location_match_bonus += 0.15
-            elif preferred_location == "asia" and any(country in job_location for country in ["malaysia", "singapore", "china", "japan", "korea", "thailand", "indonesia"]):
+            elif preferred_location == "africa" and any(country in job_location for country in ["nigeria", "angola", "egypt", "ghana", "libya", "south africa"]):
                 location_match_bonus += 0.15
-            elif preferred_location == "africa" and any(country in job_location for country in ["nigeria", "angola", "egypt", "ghana", "libya"]):
+            elif preferred_location == "europe" and any(country in job_location for country in ["uk", "norway", "netherlands", "london", "aberdeen", "north sea", "stavanger"]):
                 location_match_bonus += 0.15
-            elif preferred_location == "uk" and ("uk" in job_location or "london" in job_location or "aberdeen" in job_location):
+            elif preferred_location == "north america" and any(country in job_location for country in ["usa", "canada", "houston", "calgary", "texas", "alberta", "denver"]):
+                location_match_bonus += 0.15
+            elif preferred_location == "south america" and any(country in job_location for country in ["brazil", "venezuela", "colombia", "argentina", "chile"]):
+                location_match_bonus += 0.15
+            elif preferred_location == "australia" and any(country in job_location for country in ["australia", "perth", "melbourne", "sydney"]):
                 location_match_bonus += 0.15
         
         # Cap location bonus at 0.20

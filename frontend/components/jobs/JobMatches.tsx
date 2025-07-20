@@ -162,6 +162,11 @@ export default function JobMatches({ taskId }: JobMatchesProps) {
 
       {matches.length > 0 && (
         <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+            <div className="text-sm text-blue-800">
+              <strong>Results:</strong> Showing top {matches.length} AI-matched jobs from {jobResults.length} total jobs found
+            </div>
+          </div>
           {matches.map(match => (
             <div key={match.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
@@ -213,8 +218,10 @@ export default function JobMatches({ taskId }: JobMatchesProps) {
 
       {matches.length === 0 && jobResults.length > 0 && (
         <div className="space-y-4">
-          <div className="text-sm text-gray-600 mb-4">
-            Showing {jobResults.length} job listings from scan (click "Find Matches" for AI matching)
+          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
+            <div className="text-sm text-yellow-800">
+              <strong>Jobs Found:</strong> {jobResults.length} total jobs from scan (click "Find Matches" for AI-powered matching)
+            </div>
           </div>
           {jobResults.map(job => (
             <div key={job.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">

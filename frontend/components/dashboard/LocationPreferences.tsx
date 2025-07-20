@@ -13,15 +13,11 @@ interface LocationPreference {
 const POPULAR_LOCATIONS = [
   'Asia',
   'Africa', 
-  'North Sea',
-  'UK',
-  'Global',
-  'Worldwide',
-  'Middle East',
+  'Europe',
   'North America',
   'South America',
-  'Europe',
-  'Australia'
+  'Australia',
+  'Worldwide'
 ]
 
 export default function LocationPreferences() {
