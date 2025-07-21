@@ -451,78 +451,78 @@ def scrape_rigzone_jobs(max_pages: int = 100) -> List[dict]:
                 
             for article in job_articles:
                 try:
-                    # Extract job title and URL
-                    heading = article.find('div', class_='heading')
-                    if not heading:
-                        continue
-                        
-                    title_link = heading.find('h3').find('a') if heading.find('h3') else None
-                    if not title_link:
-                        continue
-                        
-                    title = title_link.get_text(strip=True)
-                    job_url = title_link.get('href', '')
+                    # Extract title
+                    title_elem = article.find('h3')
+                    title = title_elem.get_text(strip=True) if title_elem else "Title not found"
                     
-                    # Make URL absolute if relative
-                    if job_url.startswith('/'):
-                        job_url = f"https://www.rigzone.com{job_url}"
+                    # Extract company - try multiple selectors
+                    company = "Company not specified"
+                    company_selectors = ['p.company', '.company', 'div.company', 'span.company']
+                    for sel in company_selectors:
+                        company_elem = article.select_one(sel)
+                        if company_elem and company_elem.get_text(strip=True):
+                            company = company_elem.get_text(strip=True)
+                            break
                     
-                    # Extract company and location from address
-                    address = heading.find('address')
-                    if not address:
-                        continue
-                        
-                    address_text = address.get_text(strip=True)
-                    # Try to split company and location
-                    address_parts = [part.strip() for part in address_text.split('\n') if part.strip()]
+                    # If no company element, look in all text for company patterns
+                    if company == "Company not specified":
+                        all_text = article.get_text()
+                        # Look for company patterns (often after job title)
+                        lines = [line.strip() for line in all_text.split('\n') if line.strip()]
+                        if len(lines) > 1:
+                            # Second line often contains company info
+                            company = lines[1] if len(lines[1]) < 100 else "Oil & Gas Company"
                     
-                    if address_parts:
-                        # Often RigZone combines company and location in one line
-                        full_text = address_parts[0]
-                        
-                        # Try to extract location from the end of the company text
-                        # Look for patterns like "CompanyNameCity, State, Country"
-                        location_match = re.search(r'([A-Za-z\s]+),\s*([A-Z]{2}),\s*([A-Za-z\s]+)$', full_text)
-                        if location_match:
-                            city, state, country = location_match.groups()
-                            location = f"{city.strip()}, {state.strip()}, {country.strip()}"
-                            company = full_text.replace(location_match.group(0), '').strip()
+                    # Extract location - try multiple selectors
+                    location = "Location not specified"
+                    location_selectors = ['p.location', '.location', 'div.location', 'span.location']
+                    for sel in location_selectors:
+                        location_elem = article.select_one(sel)
+                        if location_elem and location_elem.get_text(strip=True):
+                            location = location_elem.get_text(strip=True)
+                            break
+                    
+                    # If no location element, look for common location keywords
+                    if location == "Location not specified":
+                        all_text = article.get_text().lower()
+                        locations = ['texas', 'houston', 'oklahoma', 'louisiana', 'california', 'north dakota', 'pennsylvania', 'canada', 'norway', 'uk', 'scotland', 'abu dhabi', 'saudi', 'qatar', 'uae', 'oman', 'kuwait', 'nigeria', 'angola', 'brazil', 'mexico', 'australia']
+                        for loc in locations:
+                            if loc in all_text:
+                                location = loc.title()
+                                break
+                    
+                    # Extract description - try multiple selectors
+                    description = "Oil and gas industry position. Full details available on RigZone."
+                    desc_selectors = ['p.description', '.description', 'div.description', '.summary', '.details']
+                    for sel in desc_selectors:
+                        desc_elem = article.select_one(sel)
+                        if desc_elem and desc_elem.get_text(strip=True):
+                            description = desc_elem.get_text(strip=True)
+                            break
+                    
+                    # If no description, use article text (limited)
+                    if description == "Oil and gas industry position. Full details available on RigZone.":
+                        all_text = article.get_text()
+                        lines = [line.strip() for line in all_text.split('\n') if line.strip() and len(line.strip()) > 20]
+                        if len(lines) > 2:
+                            description = " ".join(lines[2:4])  # Use 3rd and 4th lines
                         else:
-                            # Try simpler pattern "CompanyCity, Country"
-                            location_match = re.search(r'([A-Za-z\s]+),\s*([A-Za-z\s]+)$', full_text)
-                            if location_match and len(location_match.group(2).strip()) > 2:
-                                city, country = location_match.groups()
-                                location = f"{city.strip()}, {country.strip()}"
-                                company = full_text.replace(location_match.group(0), '').strip()
+                            description = f"Oil and gas position: {title}. Apply via RigZone for full details."
+                    
+                    # Extract URL
+                    job_url = "https://www.rigzone.com/oil/jobs/search/"
+                    link_elem = article.find('a', href=True)
+                    if link_elem:
+                        href = link_elem.get('href')
+                        if href:
+                            if href.startswith('http'):
+                                job_url = href
                             else:
-                                company = full_text
-                                location = "Location not specified"
-                    else:
-                        company = "Unknown Company"
-                        location = "Location not specified"
+                                job_url = f"https://www.rigzone.com{href}"
                     
-                    # Extract job details from footer
-                    footer = article.find('footer', class_='details')
-                    experience = ""
-                    skills = ""
-                    
-                    if footer:
-                        exp_span = footer.find('span', class_='experience')
-                        if exp_span:
-                            experience = exp_span.get_text(strip=True)
-                            
-                        resp_span = footer.find('span', class_='responsibility')
-                        if resp_span:
-                            skills = resp_span.get_text(strip=True)
-                    
-                    # Build description
-                    description_parts = []
-                    if experience:
-                        description_parts.append(f"Experience: {experience}")
-                    if skills:
-                        description_parts.append(f"Skills: {skills}")
-                    
-                    description = " | ".join(description_parts) if description_parts else "Job details available on RigZone."
+                    # Ensure description is not empty
+                    if not description or len(description.strip()) < 10:
+                        description = f"Oil and gas position: {title}. Apply via RigZone for full details."
                     
                     # Only add jobs with valid titles and URLs
                     if title and job_url:
