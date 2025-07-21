@@ -485,9 +485,10 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
             
             # Try different URL patterns for Orion Jobs
             urls_to_try = [
-                f"{base_url}?page={page}&category=oil-gas",
-                f"{base_url}?page={page}&sector=oil-gas", 
-                f"{base_url}?p={page}&Oil=1&Gas=1",
+                f"{base_url}",  # Start with basic URL
+                f"{base_url}?keywords=oil+gas",
+                f"{base_url}?keywords=petroleum", 
+                f"{base_url}?sector=oil-gas",
                 f"{base_url}?page={page}"
             ]
             
@@ -501,7 +502,7 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
                     
                     soup = BeautifulSoup(response.content, 'html.parser')
                     
-                    # Try common job listing selectors
+                    # Try extensive job listing selectors
                     job_selectors = [
                         'div.job-item',
                         'div.job-listing', 
@@ -509,7 +510,15 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
                         'div.job-card',
                         'li.job',
                         '.job-result',
-                        '.job-post'
+                        '.job-post',
+                        'div[class*="job"]',
+                        'li[class*="job"]',
+                        'article[class*="job"]',
+                        '.search-result',
+                        '.result-item',
+                        'tr.job',
+                        'div.vacancy',
+                        'div.position'
                     ]
                     
                     job_articles = []
@@ -520,66 +529,97 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
                             print(f"Found {len(job_articles)} jobs using selector: {selector}")
                             break
                     
+                    # If no specific job selectors work, try finding links that might be job links
+                    if not job_articles:
+                        print("Trying to find job links...")
+                        potential_job_links = soup.find_all('a', href=True)
+                        job_links = [link for link in potential_job_links 
+                                   if any(keyword in link.get('href', '').lower() 
+                                         for keyword in ['job', 'vacancy', 'position', 'career'])]
+                        
+                        if job_links:
+                            print(f"Found {len(job_links)} potential job links")
+                            # Create mock job articles from links
+                            job_articles = job_links[:20]  # Limit to 20 per page
+                    
                     if job_articles:
                         page_jobs_found = True
                         
                         for article in job_articles:
                             try:
-                                # Extract job title
-                                title_selectors = ['h2 a', 'h3 a', '.job-title a', '.title a', 'a.job-link']
-                                title = ""
-                                job_url = ""
-                                
-                                for title_sel in title_selectors:
-                                    title_elem = article.select_one(title_sel)
-                                    if title_elem:
-                                        title = title_elem.get_text(strip=True)
-                                        job_url = title_elem.get('href', '')
-                                        break
-                                
-                                if not title:
-                                    # Try without link
-                                    for title_sel in ['h2', 'h3', '.job-title', '.title']:
+                                # Check if this is a direct link or a job container
+                                if article.name == 'a':
+                                    # This is a direct job link
+                                    title = article.get_text(strip=True)
+                                    job_url = article.get('href', '')
+                                    company = "Company via Orion Jobs"
+                                    location = "Location not specified"
+                                    description = "Job details available on Orion Jobs"
+                                else:
+                                    # This is a job container, extract details
+                                    # Extract job title
+                                    title_selectors = ['h2 a', 'h3 a', '.job-title a', '.title a', 'a.job-link', 'h2', 'h3', '.job-title', '.title']
+                                    title = ""
+                                    job_url = ""
+                                    
+                                    for title_sel in title_selectors:
                                         title_elem = article.select_one(title_sel)
                                         if title_elem:
                                             title = title_elem.get_text(strip=True)
+                                            if title_elem.name == 'a':
+                                                job_url = title_elem.get('href', '')
                                             break
-                                
-                                # Extract company
-                                company_selectors = ['.company', '.employer', '.company-name', '.job-company']
-                                company = ""
-                                for comp_sel in company_selectors:
-                                    comp_elem = article.select_one(comp_sel)
-                                    if comp_elem:
-                                        company = comp_elem.get_text(strip=True)
-                                        break
-                                
-                                # Extract location
-                                location_selectors = ['.location', '.job-location', '.place', '.job-place']
-                                location = ""
-                                for loc_sel in location_selectors:
-                                    loc_elem = article.select_one(loc_sel)
-                                    if loc_elem:
-                                        location = loc_elem.get_text(strip=True)
-                                        break
-                                
-                                # Extract date posted
-                                date_selectors = ['.date', '.posted-date', '.job-date', '.posted', 'time']
-                                date_posted = ""
-                                for date_sel in date_selectors:
-                                    date_elem = article.select_one(date_sel)
-                                    if date_elem:
-                                        date_posted = date_elem.get_text(strip=True)
-                                        break
-                                
-                                # Extract description
-                                desc_selectors = ['.description', '.job-description', '.summary', '.excerpt']
-                                description = ""
-                                for desc_sel in desc_selectors:
-                                    desc_elem = article.select_one(desc_sel)
-                                    if desc_elem:
-                                        description = desc_elem.get_text(strip=True)
-                                        break
+                                    
+                                    # Extract company
+                                    company_selectors = ['.company', '.employer', '.company-name', '.job-company']
+                                    company = ""
+                                    for comp_sel in company_selectors:
+                                        comp_elem = article.select_one(comp_sel)
+                                        if comp_elem:
+                                            company = comp_elem.get_text(strip=True)
+                                            break
+                                    
+                                    # Extract location
+                                    location_selectors = ['.location', '.job-location', '.place', '.job-place']
+                                    location = ""
+                                    for loc_sel in location_selectors:
+                                        loc_elem = article.select_one(loc_sel)
+                                        if loc_elem:
+                                            location = loc_elem.get_text(strip=True)
+                                            break
+                                    
+                                    # Extract date posted
+                                    date_selectors = ['.date', '.posted-date', '.job-date', '.posted', 'time']
+                                    date_posted = ""
+                                    for date_sel in date_selectors:
+                                        date_elem = article.select_one(date_sel)
+                                        if date_elem:
+                                            date_posted = date_elem.get_text(strip=True)
+                                            break
+                                    
+                                    # Extract description
+                                    desc_selectors = ['.description', '.job-description', '.summary', '.excerpt']
+                                    description = ""
+                                    for desc_sel in desc_selectors:
+                                        desc_elem = article.select_one(desc_sel)
+                                        if desc_elem:
+                                            description = desc_elem.get_text(strip=True)
+                                            break
+                                    
+                                    # Build description with available info
+                                    desc_parts = []
+                                    if date_posted:
+                                        desc_parts.append(f"Posted: {date_posted}")
+                                    if description:
+                                        desc_parts.append(description)
+                                    
+                                    description = " | ".join(desc_parts) if desc_parts else "Job details available on Orion Jobs."
+                                    
+                                    # Set defaults if not found
+                                    if not company:
+                                        company = "Company via Orion Jobs"
+                                    if not location:
+                                        location = "Location not specified"
                                 
                                 # Make URL absolute
                                 if job_url and job_url.startswith('/'):
@@ -587,23 +627,14 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
                                 elif not job_url:
                                     job_url = f"https://www.orionjobs.com/job-search/"
                                 
-                                # Build description with available info
-                                desc_parts = []
-                                if date_posted:
-                                    desc_parts.append(f"Posted: {date_posted}")
-                                if description:
-                                    desc_parts.append(description)
-                                
-                                final_description = " | ".join(desc_parts) if desc_parts else "Job details available on Orion Jobs."
-                                
                                 # Only add jobs with valid titles
-                                if title:
+                                if title and len(title) > 3:  # Basic validation
                                     jobs.append({
                                         'title': title,
-                                        'company': company if company else "Company not specified",
-                                        'location': location if location else "Location not specified", 
+                                        'company': company,
+                                        'location': location, 
                                         'url': job_url,
-                                        'description': final_description
+                                        'description': description
                                     })
                                     
                             except Exception as e:
