@@ -15,13 +15,14 @@ import random
 import requests
 from bs4 import BeautifulSoup
 import re
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service
+# Selenium imports commented out for Railway deployment
+# from selenium import webdriver
+# from selenium.webdriver.common.by import By
+# from selenium.webdriver.support.ui import WebDriverWait
+# from selenium.webdriver.support import expected_conditions as EC
+# from selenium.webdriver.chrome.options import Options
+# from webdriver_manager.chrome import ChromeDriverManager
+# from selenium.webdriver.chrome.service import Service
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./petromatch.db")
@@ -783,6 +784,11 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
     return jobs
 
 def scrape_orion_jobs_selenium(max_jobs: int = 50) -> List[dict]:
+    """Scrape jobs from Orion Jobs using Selenium - disabled for Railway deployment"""
+    print("Selenium scraping disabled for Railway deployment")
+    return []
+
+def scrape_orion_jobs_selenium_local(max_jobs: int = 50) -> List[dict]:
     """Scrape jobs from Orion Jobs using Selenium for JavaScript rendering"""
     jobs = []
     

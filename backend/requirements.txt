@@ -10,5 +10,3 @@ python-multipart
 requests
 beautifulsoup4
 lxml
-selenium
-webdriver-manager
