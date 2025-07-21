@@ -290,6 +290,58 @@ def debug_orion_connectivity():
             "error": str(e)
         }
 
+@app.get("/debug/orion-html-structure")
+def debug_orion_html_structure():
+    """Analyze HTML structure of Orion Jobs page"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get("https://www.orionjobs.com/job-search/?+Gas=", headers=headers, timeout=15)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Find all unique tag/class combinations
+        elements_found = {}
+        for element in soup.find_all():
+            tag = element.name
+            classes = element.get('class', [])
+            class_str = ' '.join(classes) if classes else 'no-class'
+            key = f"{tag}.{class_str}"
+            
+            if key not in elements_found:
+                elements_found[key] = {
+                    "count": 0,
+                    "sample_text": ""
+                }
+            
+            elements_found[key]["count"] += 1
+            if not elements_found[key]["sample_text"] and element.get_text(strip=True):
+                elements_found[key]["sample_text"] = element.get_text(strip=True)[:100]
+        
+        # Focus on potentially job-related elements
+        job_related = {}
+        for key, info in elements_found.items():
+            if any(keyword in key.lower() for keyword in ['job', 'position', 'vacancy', 'listing', 'result', 'card', 'item']):
+                job_related[key] = info
+        
+        return {
+            "status": "completed",
+            "page_info": {
+                "total_elements": len(elements_found),
+                "has_jobs_text": "job" in response.text.lower(),
+                "content_length": len(response.content)
+            },
+            "job_related_elements": job_related,
+            "common_elements": dict(sorted(elements_found.items(), key=lambda x: x[1]["count"], reverse=True)[:20])
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
 @app.post("/auth/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Check if user exists
