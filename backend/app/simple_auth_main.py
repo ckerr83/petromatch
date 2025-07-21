@@ -879,54 +879,93 @@ def scrape_orion_jobs_selenium(max_jobs: int = 50) -> List[dict]:
                 if not job_text or len(job_text) < 10:
                     continue
                 
-                # Try to extract title (first line or link text)
-                title = job_text.split('\n')[0] if '\n' in job_text else job_text
-                title = title[:100]  # Limit title length
+                # Parse the Orion Jobs format: Yesterday\nTR/078474\nWell Site HSE Supervisor Offshore\nCompetitive\nOman\nContract\nWe have a current op...
+                lines = [line.strip() for line in job_text.split('\n') if line.strip()]
+                
+                if len(lines) < 3:
+                    continue
+                
+                # Extract fields from the structured format
+                date_posted = lines[0] if lines[0] and not lines[0].startswith('TR/') else "Recently"
+                job_ref = ""
+                title_line_idx = 1
+                
+                # Find job reference and title
+                if len(lines) > 1 and lines[1].startswith('TR/'):
+                    job_ref = lines[1]
+                    title_line_idx = 2
+                
+                title = lines[title_line_idx] if len(lines) > title_line_idx else "Position Available"
+                
+                # Extract additional fields
+                salary = ""
+                location = "Location Not Specified"
+                job_type = ""
+                
+                remaining_lines = lines[title_line_idx + 1:]
+                
+                # Look for location patterns (countries, cities)
+                location_keywords = ['uk', 'usa', 'london', 'houston', 'aberdeen', 'norway', 'oman', 'qatar', 'uae', 'saudi', 'kuwait', 'iraq', 'algeria', 'nigeria', 'angola', 'brazil', 'mexico', 'canada', 'australia', 'scotland', 'england', 'texas', 'louisiana', 'california', 'north sea', 'gulf', 'offshore', 'onshore']
+                salary_keywords = ['competitive', '$', '£', 'k', 'per', 'annum', 'day rate', 'negotiable']
+                contract_keywords = ['contract', 'permanent', 'temp', 'full-time', 'part-time', 'freelance']
+                
+                for line in remaining_lines:
+                    line_lower = line.lower()
+                    if any(keyword in line_lower for keyword in location_keywords):
+                        location = line
+                    elif any(keyword in line_lower for keyword in salary_keywords):
+                        salary = line
+                    elif any(keyword in line_lower for keyword in contract_keywords):
+                        job_type = line
                 
                 # Try to get URL
                 job_url = element.get_attribute('href') if element.tag_name == 'a' else None
                 if not job_url:
                     # Try to find a link within the element
-                    link_element = element.find_element(By.TAG_NAME, 'a') if element.tag_name != 'a' else None
-                    job_url = link_element.get_attribute('href') if link_element else "https://www.orionjobs.com/job-search/?+Gas="
+                    try:
+                        link_element = element.find_element(By.TAG_NAME, 'a')
+                        job_url = link_element.get_attribute('href')
+                    except:
+                        job_url = f"https://www.orionjobs.com/job-search/?+Gas=#{job_ref}" if job_ref else "https://www.orionjobs.com/job-search/?+Gas="
                 
-                # Try to extract location and company from text
-                lines = job_text.split('\n')
-                company = "Company via Orion Jobs"
-                location = "Location not specified"
-                description = job_text
+                # Build description from remaining content
+                description_parts = []
+                if date_posted and date_posted != "Recently":
+                    description_parts.append(f"Posted: {date_posted}")
+                if salary:
+                    description_parts.append(f"Salary: {salary}")
+                if job_type:
+                    description_parts.append(f"Type: {job_type}")
+                if job_ref:
+                    description_parts.append(f"Reference: {job_ref}")
                 
-                # Look for patterns that might be location/company
-                for line in lines[1:4]:  # Check first few lines after title
-                    line = line.strip()
-                    if any(loc_keyword in line.lower() for loc_keyword in ['uk', 'usa', 'london', 'houston', 'aberdeen', 'norway']):
-                        location = line
-                    elif any(comp_keyword in line.lower() for comp_keyword in ['ltd', 'inc', 'corp', 'company', 'group']):
-                        company = line
+                # Add any remaining lines as description
+                desc_lines = remaining_lines[3:] if len(remaining_lines) > 3 else []
+                if desc_lines:
+                    description_parts.append(" ".join(desc_lines[:2]))  # First 2 description lines
                 
-                # Add date extraction
-                date_posted = ""
-                for line in lines:
-                    if any(date_keyword in line.lower() for date_keyword in ['posted', 'ago', 'days', 'weeks', 'months']):
-                        date_posted = line.strip()
-                        break
+                if not description_parts:
+                    description_parts.append(f"Oil and gas position: {title} based in {location}")
                 
-                # Build description
-                desc_parts = []
-                if date_posted:
-                    desc_parts.append(f"Posted: {date_posted}")
-                if len(lines) > 1:
-                    desc_parts.append(' '.join(lines[1:3]))  # Add first 2 lines after title
+                final_description = " | ".join(description_parts)
                 
-                final_description = ' | '.join(desc_parts) if desc_parts else "Job details available on Orion Jobs"
+                # Clean up the title to remove any reference numbers
+                if job_ref and job_ref in title:
+                    title = title.replace(job_ref, "").strip()
+                
+                # Ensure we have meaningful content
+                if len(title) < 5 or title == "Position Available":
+                    title = f"Oil & Gas Position {job_ref}" if job_ref else "Oil & Gas Opportunity"
                 
                 jobs.append({
                     'title': title,
-                    'company': company,
+                    'company': "Orion Jobs Client",
                     'location': location,
                     'url': job_url,
                     'description': final_description[:500]  # Limit description length
                 })
+                
+                print(f"Extracted: {title} - {location}")
                 
             except Exception as e:
                 print(f"Error extracting job info: {e}")
