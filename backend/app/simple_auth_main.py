@@ -247,6 +247,49 @@ def debug_scrape_orion():
             "message": "Failed to scrape Orion Jobs"
         }
 
+@app.get("/debug/orion-connectivity")
+def debug_orion_connectivity():
+    """Test basic connectivity to Orion Jobs"""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        test_urls = [
+            "https://www.orionjobs.com",
+            "https://www.orionjobs.com/job-search/",
+            "https://www.orionjobs.com/job-search/?page=1",
+        ]
+        
+        results = []
+        for url in test_urls:
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                results.append({
+                    "url": url,
+                    "status_code": response.status_code,
+                    "content_length": len(response.content),
+                    "has_job_content": "job" in response.text.lower(),
+                    "title": response.text[:100] if response.text else "No content"
+                })
+            except Exception as e:
+                results.append({
+                    "url": url,
+                    "error": str(e),
+                    "status": "failed"
+                })
+        
+        return {
+            "status": "completed",
+            "test_results": results
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
 @app.post("/auth/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Check if user exists
