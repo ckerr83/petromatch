@@ -256,9 +256,9 @@ def debug_orion_connectivity():
         }
         
         test_urls = [
-            "https://www.orionjobs.com",
-            "https://www.orionjobs.com/job-search/",
-            "https://www.orionjobs.com/job-search/?page=1",
+            "https://www.orionjobs.com/job-search/?+Gas=",
+            "https://www.orionjobs.com/job-search/?+Oil=", 
+            "https://www.orionjobs.com/job-search/?+Oil=&+Gas=",
         ]
         
         results = []
@@ -473,7 +473,8 @@ def scrape_rigzone_jobs(max_pages: int = 100) -> List[dict]:
 def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
     """Scrape jobs from Orion Jobs with pagination support"""
     jobs = []
-    base_url = "https://www.orionjobs.com/job-search/"
+    # Use the correct search URL for Oil & Gas jobs
+    base_url = "https://www.orionjobs.com/job-search/?+Gas="
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -483,13 +484,13 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
         for page in range(1, max_pages + 1):
             print(f"Scraping Orion Jobs page {page}...")
             
-            # Try different URL patterns for Orion Jobs
+            # Try different URL patterns for Orion Jobs Oil & Gas search
             urls_to_try = [
-                f"{base_url}",  # Start with basic URL
-                f"{base_url}?keywords=oil+gas",
-                f"{base_url}?keywords=petroleum", 
-                f"{base_url}?sector=oil-gas",
-                f"{base_url}?page={page}"
+                "https://www.orionjobs.com/job-search/?+Gas=",  # Main gas search
+                "https://www.orionjobs.com/job-search/?+Oil=",  # Oil search  
+                "https://www.orionjobs.com/job-search/?+Oil=&+Gas=",  # Both oil and gas
+                f"https://www.orionjobs.com/job-search/?+Gas=&page={page}",  # With pagination
+                f"https://www.orionjobs.com/job-search/?+Oil=&page={page}"   # Oil with pagination
             ]
             
             page_jobs_found = False
@@ -665,7 +666,7 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
         
         # Try to find any text that looks like job titles in the page content
         try:
-            response = requests.get(base_url, headers=headers, timeout=15)
+            response = requests.get("https://www.orionjobs.com/job-search/?+Gas=", headers=headers, timeout=15)
             soup = BeautifulSoup(response.content, 'html.parser')
             
             # Look for any text containing job-related keywords
