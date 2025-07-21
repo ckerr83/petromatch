@@ -227,6 +227,26 @@ def debug_scrape_test():
             "message": "Failed to scrape RigZone"
         }
 
+@app.get("/debug/scrape-orion")
+def debug_scrape_orion():
+    """Debug endpoint to test Orion Jobs scraping directly"""
+    try:
+        print("Starting Orion Jobs debug scrape test...")
+        jobs = scrape_orion_jobs(max_pages=5)  # Test with 5 pages
+        return {
+            "status": "success", 
+            "jobs_found": len(jobs),
+            "sample_jobs": jobs[:3] if jobs else [],
+            "message": f"Successfully scraped {len(jobs)} jobs from Orion Jobs"
+        }
+    except Exception as e:
+        print(f"Orion debug scrape test error: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to scrape Orion Jobs"
+        }
+
 @app.post("/auth/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     # Check if user exists
@@ -264,7 +284,8 @@ def seed_job_boards(db: Session):
         boards = [
             JobBoard(name="RigZone", login_required=False, base_url="https://www.rigzone.com"),
             JobBoard(name="Oil & Gas Job Search", login_required=False, base_url="https://www.oilandgasjobsearch.com"),
-            JobBoard(name="Energy Jobline", login_required=False, base_url="https://www.energyjobline.com")
+            JobBoard(name="Energy Jobline", login_required=False, base_url="https://www.energyjobline.com"),
+            JobBoard(name="Orion Jobs", login_required=False, base_url="https://www.orionjobs.com")
         ]
         for board in boards:
             db.add(board)
@@ -406,6 +427,167 @@ def scrape_rigzone_jobs(max_pages: int = 100) -> List[dict]:
     print(f"Total jobs scraped from RigZone: {len(jobs)}")
     return jobs
 
+def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
+    """Scrape jobs from Orion Jobs with pagination support"""
+    jobs = []
+    base_url = "https://www.orionjobs.com/job-search/"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    
+    try:
+        for page in range(1, max_pages + 1):
+            print(f"Scraping Orion Jobs page {page}...")
+            
+            # Try different URL patterns for Orion Jobs
+            urls_to_try = [
+                f"{base_url}?page={page}&category=oil-gas",
+                f"{base_url}?page={page}&sector=oil-gas", 
+                f"{base_url}?p={page}&Oil=1&Gas=1",
+                f"{base_url}?page={page}"
+            ]
+            
+            page_jobs_found = False
+            
+            for url in urls_to_try:
+                try:
+                    print(f"Trying URL: {url}")
+                    response = requests.get(url, headers=headers, timeout=15)
+                    response.raise_for_status()
+                    
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    
+                    # Try common job listing selectors
+                    job_selectors = [
+                        'div.job-item',
+                        'div.job-listing', 
+                        'article.job',
+                        'div.job-card',
+                        'li.job',
+                        '.job-result',
+                        '.job-post'
+                    ]
+                    
+                    job_articles = []
+                    for selector in job_selectors:
+                        found_jobs = soup.select(selector)
+                        if found_jobs:
+                            job_articles = found_jobs
+                            print(f"Found {len(job_articles)} jobs using selector: {selector}")
+                            break
+                    
+                    if job_articles:
+                        page_jobs_found = True
+                        
+                        for article in job_articles:
+                            try:
+                                # Extract job title
+                                title_selectors = ['h2 a', 'h3 a', '.job-title a', '.title a', 'a.job-link']
+                                title = ""
+                                job_url = ""
+                                
+                                for title_sel in title_selectors:
+                                    title_elem = article.select_one(title_sel)
+                                    if title_elem:
+                                        title = title_elem.get_text(strip=True)
+                                        job_url = title_elem.get('href', '')
+                                        break
+                                
+                                if not title:
+                                    # Try without link
+                                    for title_sel in ['h2', 'h3', '.job-title', '.title']:
+                                        title_elem = article.select_one(title_sel)
+                                        if title_elem:
+                                            title = title_elem.get_text(strip=True)
+                                            break
+                                
+                                # Extract company
+                                company_selectors = ['.company', '.employer', '.company-name', '.job-company']
+                                company = ""
+                                for comp_sel in company_selectors:
+                                    comp_elem = article.select_one(comp_sel)
+                                    if comp_elem:
+                                        company = comp_elem.get_text(strip=True)
+                                        break
+                                
+                                # Extract location
+                                location_selectors = ['.location', '.job-location', '.place', '.job-place']
+                                location = ""
+                                for loc_sel in location_selectors:
+                                    loc_elem = article.select_one(loc_sel)
+                                    if loc_elem:
+                                        location = loc_elem.get_text(strip=True)
+                                        break
+                                
+                                # Extract date posted
+                                date_selectors = ['.date', '.posted-date', '.job-date', '.posted', 'time']
+                                date_posted = ""
+                                for date_sel in date_selectors:
+                                    date_elem = article.select_one(date_sel)
+                                    if date_elem:
+                                        date_posted = date_elem.get_text(strip=True)
+                                        break
+                                
+                                # Extract description
+                                desc_selectors = ['.description', '.job-description', '.summary', '.excerpt']
+                                description = ""
+                                for desc_sel in desc_selectors:
+                                    desc_elem = article.select_one(desc_sel)
+                                    if desc_elem:
+                                        description = desc_elem.get_text(strip=True)
+                                        break
+                                
+                                # Make URL absolute
+                                if job_url and job_url.startswith('/'):
+                                    job_url = f"https://www.orionjobs.com{job_url}"
+                                elif not job_url:
+                                    job_url = f"https://www.orionjobs.com/job-search/"
+                                
+                                # Build description with available info
+                                desc_parts = []
+                                if date_posted:
+                                    desc_parts.append(f"Posted: {date_posted}")
+                                if description:
+                                    desc_parts.append(description)
+                                
+                                final_description = " | ".join(desc_parts) if desc_parts else "Job details available on Orion Jobs."
+                                
+                                # Only add jobs with valid titles
+                                if title:
+                                    jobs.append({
+                                        'title': title,
+                                        'company': company if company else "Company not specified",
+                                        'location': location if location else "Location not specified", 
+                                        'url': job_url,
+                                        'description': final_description
+                                    })
+                                    
+                            except Exception as e:
+                                print(f"Error parsing Orion job article: {e}")
+                                continue
+                        
+                        break  # Found jobs with this URL, no need to try others
+                        
+                except Exception as e:
+                    print(f"Error with URL {url}: {e}")
+                    continue
+            
+            if not page_jobs_found:
+                print(f"No jobs found on page {page}, stopping pagination")
+                break
+                
+            print(f"Found {len([j for j in jobs if 'page_{page}' not in str(j)])} jobs on page {page}")
+            
+            # Add respectful delay
+            time.sleep(2)
+            
+    except Exception as e:
+        print(f"Error scraping Orion Jobs: {e}")
+    
+    print(f"Total jobs scraped from Orion Jobs: {len(jobs)}")
+    return jobs
+
 # Job Board API Endpoints
 @app.get("/jobs/boards", response_model=List[JobBoardResponse])
 def get_job_boards(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -456,6 +638,28 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
                         jobs_created += 1
                     except Exception as e:
                         print(f"Error creating job listing: {e}")
+                        continue
+                        
+            elif board.name == "Orion Jobs":
+                # Scrape real Orion Jobs
+                print(f"Starting Orion Jobs scraping for task {task.task_id}...")
+                orion_jobs = scrape_orion_jobs(max_pages=20)  # Scrape 20 pages from Orion Jobs
+                print(f"Orion Jobs scraping completed. Found {len(orion_jobs)} jobs")
+                
+                for job_data in orion_jobs:
+                    try:
+                        job = JobListing(
+                            task_id=task.task_id,
+                            title=job_data['title'],
+                            company=job_data['company'],
+                            location=job_data['location'],
+                            url=job_data['url'],
+                            description=job_data['description']
+                        )
+                        db.add(job)
+                        jobs_created += 1
+                    except Exception as e:
+                        print(f"Error creating Orion job listing: {e}")
                         continue
             else:
                 # For other boards, create some sample jobs for now
