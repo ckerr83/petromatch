@@ -659,49 +659,45 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
     except Exception as e:
         print(f"Error scraping Orion Jobs: {e}")
     
-    # If no jobs found, create some sample Orion Jobs entries  
-    # This handles cases where the site uses dynamic loading or has changed structure
+    # If no jobs found via traditional scraping, try alternative approaches
     if len(jobs) == 0:
-        print("No jobs found via scraping. Creating sample Orion Jobs entries...")
-        sample_orion_jobs = [
-            {
-                'title': 'Senior Drilling Engineer - North Sea',
-                'company': 'Major Oil Company via Orion Jobs',
-                'location': 'Aberdeen, UK',
-                'url': 'https://www.orionjobs.com/job-search/',
-                'description': 'Offshore drilling engineering position. Experience with subsea operations required. Posted via Orion Jobs recruitment.'
-            },
-            {
-                'title': 'Petroleum Geologist',
-                'company': 'International Energy Corp via Orion Jobs', 
-                'location': 'Houston, TX',
-                'url': 'https://www.orionjobs.com/job-search/',
-                'description': 'Geological analysis and reservoir characterization. Oil & gas exploration experience preferred. Posted via Orion Jobs.'
-            },
-            {
-                'title': 'Process Engineer - Refinery',
-                'company': 'Energy Solutions via Orion Jobs',
-                'location': 'Rotterdam, Netherlands', 
-                'url': 'https://www.orionjobs.com/job-search/',
-                'description': 'Refinery process optimization and safety management. Chemical engineering background required. Posted via Orion Jobs.'
-            },
-            {
-                'title': 'Pipeline Integrity Engineer',
-                'company': 'Pipeline Services via Orion Jobs',
-                'location': 'Calgary, AB',
-                'url': 'https://www.orionjobs.com/job-search/',
-                'description': 'Pipeline maintenance and integrity assessment. Field inspection experience needed. Posted via Orion Jobs.'
-            },
-            {
-                'title': 'HSE Manager - Offshore',
-                'company': 'Safety Consulting via Orion Jobs',
-                'location': 'Stavanger, Norway',
-                'url': 'https://www.orionjobs.com/job-search/',
-                'description': 'Health, safety, and environmental management for offshore operations. NEBOSH certification preferred. Posted via Orion Jobs.'
-            }
-        ]
-        jobs.extend(sample_orion_jobs)
-        print(f"Added {len(sample_orion_jobs)} sample Orion Jobs entries")
+        print("No jobs found via CSS selectors. Trying alternative approaches...")
+        
+        # Try to find any text that looks like job titles in the page content
+        try:
+            response = requests.get(base_url, headers=headers, timeout=15)
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Look for any text containing job-related keywords
+            all_text = soup.get_text()
+            
+            # Search for patterns that might be job titles
+            job_keywords = ['engineer', 'manager', 'analyst', 'technician', 'specialist', 'supervisor', 'director']
+            oil_gas_keywords = ['oil', 'gas', 'petroleum', 'drilling', 'offshore', 'pipeline', 'refinery']
+            
+            # Find sentences that contain both job and industry keywords
+            sentences = all_text.split('.')
+            potential_jobs = []
+            
+            for sentence in sentences[:100]:  # Check first 100 sentences
+                sentence = sentence.strip()
+                if (any(keyword in sentence.lower() for keyword in job_keywords) and 
+                    any(keyword in sentence.lower() for keyword in oil_gas_keywords) and
+                    len(sentence) < 200 and len(sentence) > 10):
+                    potential_jobs.append(sentence)
+            
+            print(f"Found {len(potential_jobs)} potential job-related text snippets")
+            
+            # If we found potential job content but couldn't parse it properly,
+            # it suggests the site structure is different than expected
+            if len(potential_jobs) > 0:
+                print("Found job-related content but couldn't parse job listings structure")
+                print("Orion Jobs may use dynamic loading or a different page structure")
+            
+        except Exception as e:
+            print(f"Alternative scraping approach failed: {e}")
+        
+        print("Orion Jobs scraping unsuccessful - site may use JavaScript loading or anti-bot protection")
     
     print(f"Total jobs scraped from Orion Jobs: {len(jobs)}")
     return jobs
@@ -761,24 +757,28 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
             elif board.name == "Orion Jobs":
                 # Scrape real Orion Jobs
                 print(f"Starting Orion Jobs scraping for task {task.task_id}...")
-                orion_jobs = scrape_orion_jobs(max_pages=20)  # Scrape 20 pages from Orion Jobs
+                orion_jobs = scrape_orion_jobs(max_pages=5)  # Try fewer pages first
                 print(f"Orion Jobs scraping completed. Found {len(orion_jobs)} jobs")
                 
-                for job_data in orion_jobs:
-                    try:
-                        job = JobListing(
-                            task_id=task.task_id,
-                            title=job_data['title'],
-                            company=job_data['company'],
-                            location=job_data['location'],
-                            url=job_data['url'],
-                            description=job_data['description']
-                        )
-                        db.add(job)
-                        jobs_created += 1
-                    except Exception as e:
-                        print(f"Error creating Orion job listing: {e}")
-                        continue
+                if len(orion_jobs) == 0:
+                    print("WARNING: Orion Jobs scraping found 0 jobs - may need manual investigation")
+                    print("Possible causes: dynamic loading, anti-bot protection, or changed site structure")
+                else:
+                    for job_data in orion_jobs:
+                        try:
+                            job = JobListing(
+                                task_id=task.task_id,
+                                title=job_data['title'],
+                                company=job_data['company'],
+                                location=job_data['location'],
+                                url=job_data['url'],
+                                description=job_data['description']
+                            )
+                            db.add(job)
+                            jobs_created += 1
+                        except Exception as e:
+                            print(f"Error creating Orion job listing: {e}")
+                            continue
             else:
                 # For other boards, create some sample jobs for now
                 sample_jobs_data = [
