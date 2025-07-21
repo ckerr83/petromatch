@@ -15,6 +15,13 @@ import random
 import requests
 from bs4 import BeautifulSoup
 import re
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./petromatch.db")
@@ -288,6 +295,26 @@ def debug_orion_connectivity():
         return {
             "status": "error",
             "error": str(e)
+        }
+
+@app.get("/debug/orion-selenium")
+def debug_orion_selenium():
+    """Test Orion Jobs scraping with Selenium"""
+    try:
+        print("Starting Orion Jobs Selenium debug test...")
+        jobs = scrape_orion_jobs_selenium(max_jobs=10)  # Test with 10 jobs
+        return {
+            "status": "success", 
+            "jobs_found": len(jobs),
+            "sample_jobs": jobs[:3] if jobs else [],
+            "message": f"Successfully scraped {len(jobs)} jobs from Orion Jobs using Selenium"
+        }
+    except Exception as e:
+        print(f"Orion Selenium debug test error: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to scrape Orion Jobs with Selenium"
         }
 
 @app.get("/debug/orion-html-structure")
@@ -755,6 +782,168 @@ def scrape_orion_jobs(max_pages: int = 20) -> List[dict]:
     print(f"Total jobs scraped from Orion Jobs: {len(jobs)}")
     return jobs
 
+def scrape_orion_jobs_selenium(max_jobs: int = 50) -> List[dict]:
+    """Scrape jobs from Orion Jobs using Selenium for JavaScript rendering"""
+    jobs = []
+    
+    # Configure Chrome options for headless operation
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    
+    driver = None
+    try:
+        print("Starting Selenium WebDriver for Orion Jobs...")
+        
+        # Setup Chrome driver
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        # Navigate to Orion Jobs gas search page
+        url = "https://www.orionjobs.com/job-search/?+Gas="
+        print(f"Loading page: {url}")
+        driver.get(url)
+        
+        # Wait for page to load and content to be rendered
+        print("Waiting for page content to load...")
+        WebDriverWait(driver, 20).until(
+            lambda driver: driver.execute_script("return document.readyState") == "complete"
+        )
+        
+        # Additional wait for dynamic content
+        time.sleep(5)
+        
+        # Try to find job listings with various selectors
+        job_selectors = [
+            "div[class*='job']",
+            "li[class*='job']", 
+            "article[class*='job']",
+            "div[class*='listing']",
+            "div[class*='position']",
+            "div[class*='vacancy']",
+            "tr[class*='job']",
+            ".job-item",
+            ".job-listing",
+            ".job-card",
+            ".job-result",
+            ".search-result"
+        ]
+        
+        job_elements = []
+        for selector in job_selectors:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    print(f"Found {len(elements)} elements with selector: {selector}")
+                    job_elements = elements
+                    break
+            except Exception as e:
+                print(f"Selector {selector} failed: {e}")
+                continue
+        
+        # If no specific job selectors work, try finding clickable elements with job-related text
+        if not job_elements:
+            print("No job containers found, looking for job-related links...")
+            all_links = driver.find_elements(By.TAG_NAME, "a")
+            job_elements = [link for link in all_links 
+                          if any(keyword in link.text.lower() 
+                                for keyword in ['engineer', 'manager', 'technician', 'analyst', 'specialist'])
+                          and any(keyword in link.text.lower() 
+                                for keyword in ['oil', 'gas', 'petroleum', 'drilling', 'offshore'])]
+            
+            if job_elements:
+                print(f"Found {len(job_elements)} potential job links")
+        
+        # If still no elements, try broader search
+        if not job_elements:
+            print("Trying broader element search...")
+            # Look for any elements containing job-related keywords
+            all_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Engineer') or contains(text(), 'Manager') or contains(text(), 'Technician')]")
+            job_elements = [elem for elem in all_elements 
+                          if any(keyword in elem.text.lower() 
+                                for keyword in ['oil', 'gas', 'petroleum', 'drilling'])]
+            
+            if job_elements:
+                print(f"Found {len(job_elements)} elements with job keywords")
+        
+        # Extract job information
+        for element in job_elements[:max_jobs]:  # Limit to max_jobs
+            try:
+                # Get text content
+                job_text = element.text.strip()
+                
+                if not job_text or len(job_text) < 10:
+                    continue
+                
+                # Try to extract title (first line or link text)
+                title = job_text.split('\n')[0] if '\n' in job_text else job_text
+                title = title[:100]  # Limit title length
+                
+                # Try to get URL
+                job_url = element.get_attribute('href') if element.tag_name == 'a' else None
+                if not job_url:
+                    # Try to find a link within the element
+                    link_element = element.find_element(By.TAG_NAME, 'a') if element.tag_name != 'a' else None
+                    job_url = link_element.get_attribute('href') if link_element else "https://www.orionjobs.com/job-search/?+Gas="
+                
+                # Try to extract location and company from text
+                lines = job_text.split('\n')
+                company = "Company via Orion Jobs"
+                location = "Location not specified"
+                description = job_text
+                
+                # Look for patterns that might be location/company
+                for line in lines[1:4]:  # Check first few lines after title
+                    line = line.strip()
+                    if any(loc_keyword in line.lower() for loc_keyword in ['uk', 'usa', 'london', 'houston', 'aberdeen', 'norway']):
+                        location = line
+                    elif any(comp_keyword in line.lower() for comp_keyword in ['ltd', 'inc', 'corp', 'company', 'group']):
+                        company = line
+                
+                # Add date extraction
+                date_posted = ""
+                for line in lines:
+                    if any(date_keyword in line.lower() for date_keyword in ['posted', 'ago', 'days', 'weeks', 'months']):
+                        date_posted = line.strip()
+                        break
+                
+                # Build description
+                desc_parts = []
+                if date_posted:
+                    desc_parts.append(f"Posted: {date_posted}")
+                if len(lines) > 1:
+                    desc_parts.append(' '.join(lines[1:3]))  # Add first 2 lines after title
+                
+                final_description = ' | '.join(desc_parts) if desc_parts else "Job details available on Orion Jobs"
+                
+                jobs.append({
+                    'title': title,
+                    'company': company,
+                    'location': location,
+                    'url': job_url,
+                    'description': final_description[:500]  # Limit description length
+                })
+                
+            except Exception as e:
+                print(f"Error extracting job info: {e}")
+                continue
+        
+        print(f"Successfully extracted {len(jobs)} jobs using Selenium")
+        
+    except Exception as e:
+        print(f"Selenium scraping error: {e}")
+        
+    finally:
+        if driver:
+            driver.quit()
+            print("WebDriver closed")
+    
+    return jobs
+
 # Job Board API Endpoints
 @app.get("/jobs/boards", response_model=List[JobBoardResponse])
 def get_job_boards(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -808,15 +997,17 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
                         continue
                         
             elif board.name == "Orion Jobs":
-                # Scrape real Orion Jobs
-                print(f"Starting Orion Jobs scraping for task {task.task_id}...")
-                orion_jobs = scrape_orion_jobs(max_pages=5)  # Try fewer pages first
-                print(f"Orion Jobs scraping completed. Found {len(orion_jobs)} jobs")
-                
-                if len(orion_jobs) == 0:
-                    print("WARNING: Orion Jobs scraping found 0 jobs - may need manual investigation")
-                    print("Possible causes: dynamic loading, anti-bot protection, or changed site structure")
-                else:
+                # Scrape real Orion Jobs using Selenium for JavaScript rendering
+                print(f"Starting Orion Jobs Selenium scraping for task {task.task_id}...")
+                try:
+                    orion_jobs = scrape_orion_jobs_selenium(max_jobs=30)  # Use Selenium
+                    print(f"Orion Jobs Selenium scraping completed. Found {len(orion_jobs)} jobs")
+                    
+                    if len(orion_jobs) == 0:
+                        print("WARNING: Selenium scraping found 0 jobs - falling back to traditional scraping")
+                        orion_jobs = scrape_orion_jobs(max_pages=3)  # Fallback to traditional scraping
+                        print(f"Fallback scraping found {len(orion_jobs)} jobs")
+                    
                     for job_data in orion_jobs:
                         try:
                             job = JobListing(
@@ -832,6 +1023,31 @@ def start_job_scrape(request: ScrapeRequest, current_user: User = Depends(get_cu
                         except Exception as e:
                             print(f"Error creating Orion job listing: {e}")
                             continue
+                            
+                except Exception as e:
+                    print(f"Selenium scraping failed: {e}")
+                    print("Falling back to traditional scraping...")
+                    try:
+                        orion_jobs = scrape_orion_jobs(max_pages=3)
+                        print(f"Fallback scraping found {len(orion_jobs)} jobs")
+                        
+                        for job_data in orion_jobs:
+                            try:
+                                job = JobListing(
+                                    task_id=task.task_id,
+                                    title=job_data['title'],
+                                    company=job_data['company'],
+                                    location=job_data['location'],
+                                    url=job_data['url'],
+                                    description=job_data['description']
+                                )
+                                db.add(job)
+                                jobs_created += 1
+                            except Exception as e:
+                                print(f"Error creating fallback job listing: {e}")
+                                continue
+                    except Exception as fallback_error:
+                        print(f"Both Selenium and fallback scraping failed: {fallback_error}")
             else:
                 # For other boards, create some sample jobs for now
                 sample_jobs_data = [
