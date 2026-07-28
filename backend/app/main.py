@@ -1,32 +1,13 @@
+from __future__ import annotations
+
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from .routers import auth, user, jobs, notifications
-from .core.database import engine, Base
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+from app.api.router import api_router
+from app.core.config import get_settings
+from app.core.logging import configure_logging
 
-app = FastAPI(title="PetroMatch API", version="1.0.0")
+configure_logging()
+settings = get_settings()
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "https://petromatch-app.vercel.app",
-        "https://*.vercel.app"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Include routers
-app.include_router(auth.router)
-app.include_router(user.router)
-app.include_router(jobs.router)
-app.include_router(notifications.router)
-
-@app.get("/")
-def read_root():
-    return {"message": "PetroMatch API"}
+app = FastAPI(title=settings.app_name)
+app.include_router(api_router)

@@ -14,6 +14,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+backend/.secrets/
 
 # Logs
 *.log
@@ -73,3 +74,10 @@ ngrok*
 debug_*.py
 extracted_jobs.json
 rigzone_debug_output.html
+
+backend/.venv/
+backend/*.egg-info/
+backend/.env
+backend/.secrets/
+__pycache__/
+.DS_Store

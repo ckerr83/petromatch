@@ -1,8 +1,14 @@
 FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-ENV SELENIUM_ENABLED=false
-EXPOSE 8080
-CMD ["sh", "-c", "uvicorn app.simple_auth_main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+
+COPY pyproject.toml /app/pyproject.toml
+RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
+
+COPY . /app
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+

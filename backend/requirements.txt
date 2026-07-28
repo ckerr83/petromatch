@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-requests
-beautifulsoup4
-sqlalchemy
-pydantic
-python-jose[cryptography]
-passlib[bcrypt]
-python-multipart

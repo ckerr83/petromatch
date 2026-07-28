@@ -1,27 +1,34 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
-import os
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./petromatch.db")
-    REDIS_URL: str = "redis://localhost:6379"
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here-change-in-production")
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    
-    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", "")
-    
-    SENDGRID_API_KEY: Optional[str] = None
-    SMTP_SERVER: Optional[str] = None
-    SMTP_PORT: Optional[int] = None
-    SMTP_USERNAME: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
-    
-    CELERY_BROKER_URL: str = "redis://localhost:6379"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379"
-    
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-settings = Settings()
+    app_name: str = Field(default="PetroMatch Backend", alias="APP_NAME")
+    app_env: str = Field(default="development", alias="APP_ENV")
+    app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
+    app_port: int = Field(default=8000, alias="APP_PORT")
+    database_url: str = Field(
+        default="postgresql+psycopg://postgres:postgres@localhost:5432/petromatch",
+        alias="DATABASE_URL",
+    )
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    storage_path: Path = Field(default=Path("storage"), alias="STORAGE_PATH")
+    request_timeout_seconds: float = Field(default=20.0, alias="REQUEST_TIMEOUT_SECONDS")
+    gmail_oauth_client_path: Path = Field(
+        default=Path(".secrets/google_oauth_client.json"), alias="GMAIL_OAUTH_CLIENT_PATH"
+    )
+    gmail_token_path: Path = Field(default=Path(".secrets/gmail_token.json"), alias="GMAIL_TOKEN_PATH")
+    gmail_query: str = Field(default="is:unread", alias="GMAIL_QUERY")
+    gmail_max_results: int = Field(default=50, alias="GMAIL_MAX_RESULTS")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
