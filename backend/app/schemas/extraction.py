@@ -12,6 +12,7 @@ class ExtractionRunResponse(ORMModel):
     jobs_found: int
     jobs_created: int
     duplicates_skipped: int
+    errors: list[str] = []
 
 
 class EmailExtractionResponse(ORMModel):
@@ -22,3 +23,4 @@ class EmailExtractionResponse(ORMModel):
     jobs_created: int
     duplicates_skipped: int
     failures: int
+    errors: list[str] = []

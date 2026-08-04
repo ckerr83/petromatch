@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,11 +10,28 @@ from app.core.config import get_settings
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 
+class GmailCredentialsError(RuntimeError):
+    pass
+
+
 class GmailClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        oauth_client_path: Path | None = None,
+        token_path: Path | None = None,
+        token_json: str | None = None,
+        google_client_id: str | None = None,
+        google_client_secret: str | None = None,
+    ) -> None:
         settings = get_settings()
-        self.oauth_client_path = settings.gmail_oauth_client_path
-        self.token_path = settings.gmail_token_path
+        self.oauth_client_path = oauth_client_path or settings.gmail_oauth_client_path
+        self.token_path = token_path or settings.gmail_token_path
+        self.token_json = token_json if token_json is not None else settings.gmail_token_json
+        self.google_client_id = google_client_id if google_client_id is not None else settings.google_client_id
+        self.google_client_secret = (
+            google_client_secret if google_client_secret is not None else settings.google_client_secret
+        )
 
     def build_service(self) -> Any:
         credentials = self._load_credentials()
@@ -70,16 +88,25 @@ class GmailClient:
         oauth_client_path = _resolve_backend_path(self.oauth_client_path)
         credentials = None
 
-        if token_path.exists():
+        if self.token_json:
+            credentials = credentials_from_token_json(
+                self.token_json,
+                google_client_id=self.google_client_id,
+                google_client_secret=self.google_client_secret,
+            )
+        elif token_path.exists():
             credentials = Credentials.from_authorized_user_file(str(token_path), GMAIL_SCOPES)
 
         if credentials and credentials.expired and credentials.refresh_token:
             credentials.refresh(Request())
-            _write_token(token_path, credentials.to_json())
+            if not self.token_json:
+                _write_token(token_path, credentials.to_json())
 
         if not credentials or not credentials.valid:
+            if self.token_json:
+                raise GmailCredentialsError("Gmail credentials from GMAIL_TOKEN_JSON are missing, invalid, or expired.")
             if not oauth_client_path.exists():
-                raise FileNotFoundError(
+                raise GmailCredentialsError(
                     f"Gmail OAuth client JSON not found at {oauth_client_path}. "
                     "Set GMAIL_OAUTH_CLIENT_PATH or place the file there."
                 )
@@ -88,6 +115,35 @@ class GmailClient:
             _write_token(token_path, credentials.to_json())
 
         return credentials
+
+
+def credentials_from_token_json(
+    token_json: str,
+    *,
+    google_client_id: str | None = None,
+    google_client_secret: str | None = None,
+) -> Any:
+    from google.oauth2.credentials import Credentials
+
+    try:
+        token_info = json.loads(token_json)
+    except json.JSONDecodeError as exc:
+        raise GmailCredentialsError("GMAIL_TOKEN_JSON is not valid JSON.") from exc
+
+    if not isinstance(token_info, dict):
+        raise GmailCredentialsError("GMAIL_TOKEN_JSON must be a JSON object.")
+
+    if google_client_id:
+        token_info["client_id"] = google_client_id
+    if google_client_secret:
+        token_info["client_secret"] = google_client_secret
+
+    if not token_info.get("refresh_token"):
+        raise GmailCredentialsError("GMAIL_TOKEN_JSON must include a refresh_token.")
+    if not token_info.get("client_id") or not token_info.get("client_secret"):
+        raise GmailCredentialsError("Google OAuth client ID and secret are required for Gmail token refresh.")
+
+    return Credentials.from_authorized_user_info(token_info, GMAIL_SCOPES)
 
 
 def _resolve_backend_path(path: Path) -> Path:

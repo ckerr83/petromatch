@@ -25,8 +25,20 @@ class Settings(BaseSettings):
         default=Path(".secrets/google_oauth_client.json"), alias="GMAIL_OAUTH_CLIENT_PATH"
     )
     gmail_token_path: Path = Field(default=Path(".secrets/gmail_token.json"), alias="GMAIL_TOKEN_PATH")
+    google_client_id: str | None = Field(default=None, alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str | None = Field(default=None, alias="GOOGLE_CLIENT_SECRET")
+    gmail_token_json: str | None = Field(default=None, alias="GMAIL_TOKEN_JSON")
     gmail_query: str = Field(default="is:unread", alias="GMAIL_QUERY")
     gmail_max_results: int = Field(default=50, alias="GMAIL_MAX_RESULTS")
+    cron_secret: str | None = Field(default=None, alias="CRON_SECRET")
+    allowed_origins: str = Field(default="http://localhost:3000", alias="ALLOWED_ORIGINS")
+    db_pool_size: int = Field(default=1, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=2, alias="DB_MAX_OVERFLOW")
+    db_pool_recycle_seconds: int = Field(default=300, alias="DB_POOL_RECYCLE_SECONDS")
+
+    @property
+    def allowed_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
 
 
 @lru_cache

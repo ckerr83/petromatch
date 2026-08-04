@@ -6,11 +6,14 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.db.models import Job, ProcessedEmail
 from app.services.parsers import EmailParseContext, ParsedOpportunity, ParserRegistry
 from app.services.parsers.utils import normalize_job_url
 from app.utils.fingerprints import build_dedupe_fingerprint
 from app.utils.text import normalize_whitespace
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,7 @@ class ExtractionResult:
     jobs_found: int
     jobs_created: int
     duplicates_skipped: int
+    errors: list[str]
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,7 @@ class EmailExtractionResult:
     jobs_created: int
     duplicates_skipped: int
     failures: int
+    errors: list[str]
 
 
 class ExtractionService:
@@ -48,7 +53,17 @@ class ExtractionService:
             .order_by(ProcessedEmail.received_date.asc().nullsfirst(), ProcessedEmail.id.asc())
         ).all()
 
+        logger.info("extraction_started", pending_emails=len(emails))
         results = [self.extract_email(db, email, reset_existing=False) for email in emails]
+        errors = [error for result in results for error in result.errors]
+        logger.info(
+            "extraction_completed",
+            emails_processed=len(results),
+            jobs_found=sum(result.jobs_found for result in results),
+            jobs_created=sum(result.jobs_created for result in results),
+            duplicates_skipped=sum(result.duplicates_skipped for result in results),
+            errors=len(errors),
+        )
         return ExtractionResult(
             emails_processed=len(results),
             emails_parsed=sum(1 for result in results if result.extraction_status == "parsed"),
@@ -58,6 +73,7 @@ class ExtractionService:
             jobs_found=sum(result.jobs_found for result in results),
             jobs_created=sum(result.jobs_created for result in results),
             duplicates_skipped=sum(result.duplicates_skipped for result in results),
+            errors=errors,
         )
 
     def extract_email_by_id(self, db: Session, email_id: int) -> EmailExtractionResult | None:
@@ -89,12 +105,15 @@ class ExtractionService:
         jobs_created = 0
         duplicates_skipped = 0
         failures = 0
+        errors: list[str] = []
 
         try:
             if parser is None:
                 email.extraction_status = "failed"
                 email.parsing_error = "No parser available for email content."
-                return EmailExtractionResult(email.id, None, "failed", 0, 0, 0, 1)
+                errors.append(email.parsing_error)
+                logger.warning("email_extraction_failed", email_id=email.id, error=email.parsing_error)
+                return EmailExtractionResult(email.id, None, "failed", 0, 0, 0, 1, errors)
 
             opportunities = parser.parse(context)
             jobs_found = len(opportunities)
@@ -103,7 +122,7 @@ class ExtractionService:
                 email.jobs_extracted_count = 0
                 email.parsing_error = None
                 email.parsed_at = datetime.now(UTC)
-                return EmailExtractionResult(email.id, parser_name, "no_jobs_found", 0, 0, 0, 0)
+                return EmailExtractionResult(email.id, parser_name, "no_jobs_found", 0, 0, 0, 0, errors)
 
             for opportunity in opportunities:
                 try:
@@ -115,8 +134,11 @@ class ExtractionService:
                         db.add(job)
                         db.flush()
                     jobs_created += 1
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
                     failures += 1
+                    error = f"email_id={email.id}: {type(exc).__name__}: {exc}"
+                    errors.append(error)
+                    logger.warning("job_extraction_failed", email_id=email.id, error=str(exc))
 
             email.jobs_extracted_count = jobs_created
             email.parsed_at = datetime.now(UTC)
@@ -132,8 +154,11 @@ class ExtractionService:
                 jobs_created=jobs_created,
                 duplicates_skipped=duplicates_skipped,
                 failures=failures,
+                errors=errors,
             )
         except Exception as exc:  # noqa: BLE001
+            error = f"email_id={email.id}: {type(exc).__name__}: {exc}"
+            errors.append(error)
             email.extraction_status = "failed"
             email.parsing_error = str(exc)
             email.parsed_at = datetime.now(UTC)
@@ -148,6 +173,7 @@ class ExtractionService:
                 jobs_created=jobs_created,
                 duplicates_skipped=duplicates_skipped,
                 failures=failures + 1,
+                errors=errors,
             )
 
     def _job_from_opportunity(self, email: ProcessedEmail, opportunity: ParsedOpportunity) -> Job:

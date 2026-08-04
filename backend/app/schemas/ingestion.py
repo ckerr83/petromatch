@@ -8,3 +8,4 @@ class GmailIngestionRunResponse(ORMModel):
     new_emails_stored: int
     duplicates_skipped: int
     failures: int
+    errors: list[str] = []

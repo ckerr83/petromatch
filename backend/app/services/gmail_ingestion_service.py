@@ -11,8 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.db.models import IngestionRun, ProcessedEmail
 from app.services.gmail_client import GmailClient
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,7 @@ class GmailIngestionResult:
     new_emails_stored: int
     duplicates_skipped: int
     failures: int
+    errors: list[str]
 
 
 class GmailIngestionService:
@@ -37,13 +41,16 @@ class GmailIngestionService:
         stored = 0
         skipped = 0
         failures = 0
+        errors: list[str] = []
 
         try:
+            logger.info("gmail_ingestion_started", query=settings.gmail_query, max_results=settings.gmail_max_results)
             message_ids = self.gmail_client.list_message_ids(
                 query=settings.gmail_query,
                 max_results=settings.gmail_max_results,
             )
             discovered = len(message_ids)
+            logger.info("gmail_messages_found", count=discovered)
 
             existing_ids = set(
                 db.scalars(
@@ -64,6 +71,9 @@ class GmailIngestionService:
                     db.flush()
                     stored += 1
                 except Exception as exc:  # noqa: BLE001
+                    error = f"message_id={message_id}: {type(exc).__name__}: {exc}"
+                    errors.append(error)
+                    logger.warning("gmail_message_ingestion_failed", message_id=message_id, error=str(exc))
                     db.add(
                         ProcessedEmail(
                             gmail_message_id=message_id,
@@ -78,8 +88,10 @@ class GmailIngestionService:
             run.status = "completed" if failures == 0 else "completed_with_errors"
         except Exception as exc:  # noqa: BLE001
             failures += 1
+            errors.append(f"{type(exc).__name__}: {exc}")
             run.status = "failed"
             run.error_summary = str(exc)
+            logger.error("gmail_ingestion_failed", error=str(exc))
         finally:
             run.emails_seen = discovered
             run.emails_processed = stored
@@ -88,12 +100,20 @@ class GmailIngestionService:
             run.jobs_skipped_duplicate = 0
             run.jobs_failed = 0
             run.finished_at = datetime.now(UTC)
+            logger.info(
+                "gmail_ingestion_completed",
+                emails_discovered=discovered,
+                new_emails_stored=stored,
+                duplicates_skipped=skipped,
+                failures=failures,
+            )
 
         return GmailIngestionResult(
             emails_discovered=discovered,
             new_emails_stored=stored,
             duplicates_skipped=skipped,
             failures=failures,
+            errors=errors,
         )
 
     def _fetch_and_build_record(self, message_id: str) -> ProcessedEmail:

@@ -126,44 +126,89 @@ def _external_id_from_linkedin_url(url: str | None) -> str | None:
 
 
 def _infer_fields(anchor: Tag, lines: list[str]) -> tuple[str | None, str | None, str | None]:
-    anchor_text = clean_line(anchor.get_text(" ", strip=True))
-    title = anchor_text if anchor_text and not _looks_like_action(anchor_text) else _best_title_from_lines(lines)
-    title_index = lines.index(title) if title in lines else -1
+    title, company, location = infer_linkedin_fields_from_text("\n".join(lines))
+    if title or company or location:
+        return title, company, location
 
-    company = None
-    location = None
-    following = lines[title_index + 1 :] if title_index >= 0 else lines
-    for line in following[:5]:
-        if _looks_like_location(line):
-            location = line
-            continue
-        if company is None and not _looks_like_action(line) and line != title:
-            company = line
-            continue
-    return title, company, location
+    anchor_text = clean_line(anchor.get_text(" ", strip=True))
+    title = _clean_title(anchor_text) if anchor_text and not _is_metadata_line(anchor_text) else _best_title_from_lines(lines)
+    return title, None, None
+
+
+def infer_linkedin_fields_from_text(raw_text: str | None) -> tuple[str | None, str | None, str | None]:
+    lines = lines_without_boilerplate(raw_text)
+    meaningful_lines = _meaningful_linkedin_lines(lines)
+    company_location_index = next(
+        (index for index, line in enumerate(meaningful_lines) if " · " in line),
+        -1,
+    )
+    if company_location_index >= 0:
+        company_location_line = meaningful_lines[company_location_index]
+        company, location = [
+            normalize_whitespace(part)
+            for part in company_location_line.split(" · ", 1)
+        ]
+        title = _clean_title(" ".join(meaningful_lines[:company_location_index]))
+        return title, company, location
+
+    return _best_title_from_lines(meaningful_lines), None, None
 
 
 def _best_title_from_lines(lines: list[str]) -> str | None:
     for line in lines:
-        if _looks_like_action(line):
+        if _is_metadata_line(line):
             continue
         if re.search(r"\b(engineer|manager|specialist|analyst|operator|technician|supervisor|developer|consultant|advisor|director)\b", line, re.I):
-            return normalize_whitespace(line)
+            return _clean_title(line)
     for line in lines:
-        if not _looks_like_action(line):
-            return normalize_whitespace(line)
+        if not _is_metadata_line(line):
+            return _clean_title(line)
     return None
 
 
-def _looks_like_action(line: str | None) -> bool:
-    return bool(line and re.search(r"\b(view job|apply|see more|save|posted|alert)\b", line, re.I))
+def _meaningful_linkedin_lines(lines: list[str]) -> list[str]:
+    return [line for line in (clean_line(line) for line in lines) if line and not _is_metadata_line(line)]
 
 
-def _looks_like_location(line: str | None) -> bool:
+def _is_metadata_line(line: str | None) -> bool:
+    if not line:
+        return True
+    normalized = normalize_whitespace(line).lower()
     return bool(
-        line
+        normalized
         and (
-            "," in line
-            or re.search(r"\b(remote|hybrid|onsite|united states|uk|uae|qatar|singapore|houston|london|dubai)\b", line, re.I)
+            re.fullmatch(r"actively recruiting", normalized)
+            or re.fullmatch(r"easy apply", normalized)
+            or re.fullmatch(r"\d+\s+connections?", normalized)
+            or re.fullmatch(r"\d+\s+company alumni?", normalized)
+            or re.fullmatch(r"\d+\s+company alums?", normalized)
+            or re.fullmatch(r"\d+\s+school alumni?", normalized)
+            or re.fullmatch(r"\d+\s+school alums?", normalized)
+            or re.search(r"\b(view job|apply|see more|save|job alert|unsubscribe)\b", normalized)
         )
     )
+
+
+def _clean_title(value: str | None) -> str | None:
+    value = normalize_whitespace(value)
+    if not value:
+        return None
+    value = re.sub(
+        r"\s+(?:posted\s+)?(?:today|yesterday|\d+\s+(?:hour|hours|day|days|week|weeks|month|months)\s+ago)$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\.?\s+\d{1,2}(?:,\s+\d{4})?$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"(?<=[A-Za-z0-9])(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\.?\s+\d{1,2}(?:,\s+\d{4})?$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return normalize_whitespace(value)
