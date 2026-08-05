@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+logger = get_logger(__name__)
 
 
 class GmailCredentialsError(RuntimeError):
@@ -41,6 +43,13 @@ class GmailClient:
 
     def list_message_ids(self, *, query: str, max_results: int) -> list[str]:
         service = self.build_service()
+        account_email = self._safe_account_email(service)
+        logger.info(
+            "gmail_list_messages_started",
+            query=query,
+            max_results=max_results,
+            authenticated_email=account_email,
+        )
         message_ids: list[str] = []
         request = (
             service.users()
@@ -51,10 +60,23 @@ class GmailClient:
         while request is not None and len(message_ids) < max_results:
             response = request.execute()
             message_ids.extend(message["id"] for message in response.get("messages", []))
+            logger.info(
+                "gmail_list_messages_page",
+                page_message_count=len(response.get("messages", [])),
+                result_size_estimate=response.get("resultSizeEstimate"),
+                accumulated_message_count=len(message_ids),
+            )
             if len(message_ids) >= max_results:
                 break
             request = service.users().messages().list_next(request, response)
 
+        logger.info(
+            "gmail_list_messages_completed",
+            query=query,
+            max_results=max_results,
+            authenticated_email=account_email,
+            returned_message_count=len(message_ids[:max_results]),
+        )
         return message_ids[:max_results]
 
     def get_message_full(self, message_id: str) -> dict[str, Any]:
@@ -87,6 +109,7 @@ class GmailClient:
         token_path = _resolve_backend_path(self.token_path)
         oauth_client_path = _resolve_backend_path(self.oauth_client_path)
         credentials = None
+        credential_source = "none"
 
         if self.token_json:
             credentials = credentials_from_token_json(
@@ -94,13 +117,38 @@ class GmailClient:
                 google_client_id=self.google_client_id,
                 google_client_secret=self.google_client_secret,
             )
+            credential_source = "env_gmail_token_json"
         elif token_path.exists():
             credentials = Credentials.from_authorized_user_file(str(token_path), GMAIL_SCOPES)
+            credential_source = "local_token_file"
+
+        if credentials:
+            logger.info(
+                "gmail_credentials_loaded",
+                credential_source=credential_source,
+                gmail_token_json_present=bool(self.token_json),
+                credentials_valid=bool(credentials.valid),
+                credentials_expired=bool(credentials.expired),
+                refresh_token_present=bool(credentials.refresh_token),
+            )
+        else:
+            logger.info(
+                "gmail_credentials_missing",
+                gmail_token_json_present=bool(self.token_json),
+                local_token_file_present=token_path.exists(),
+            )
 
         if credentials and credentials.expired and credentials.refresh_token:
             credentials.refresh(Request())
             if not self.token_json:
                 _write_token(token_path, credentials.to_json())
+            logger.info(
+                "gmail_credentials_refreshed",
+                credential_source=credential_source,
+                credentials_valid=bool(credentials.valid),
+                credentials_expired=bool(credentials.expired),
+                refresh_token_present=bool(credentials.refresh_token),
+            )
 
         if not credentials or not credentials.valid:
             if self.token_json:
@@ -115,6 +163,15 @@ class GmailClient:
             _write_token(token_path, credentials.to_json())
 
         return credentials
+
+    def _safe_account_email(self, service: Any) -> str | None:
+        try:
+            profile = service.users().getProfile(userId="me").execute()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("gmail_profile_lookup_failed", error_type=type(exc).__name__, error=str(exc))
+            return None
+        email = profile.get("emailAddress")
+        return email if isinstance(email, str) else None
 
 
 def credentials_from_token_json(

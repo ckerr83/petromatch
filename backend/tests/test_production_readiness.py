@@ -219,6 +219,17 @@ def test_local_token_file_loading_still_works(tmp_path: Path) -> None:
     assert credentials.valid is True
 
 
+def test_gmail_list_message_ids_uses_profile_diagnostics_without_live_gmail(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_service = FakeGmailService()
+    client = GmailClient()
+    monkeypatch.setattr(client, "build_service", lambda: fake_service)
+
+    message_ids = client.list_message_ids(query="is:unread", max_results=50)
+
+    assert message_ids == ["message-1", "message-2"]
+    assert fake_service.profile_requested is True
+
+
 def _daily_service_with_messages(messages: dict[str, dict[str, Any]]) -> DailyIngestionService:
     return DailyIngestionService(
         gmail_ingestion_service=GmailIngestionService(gmail_client=FakeGmailClient(messages)),
@@ -265,3 +276,33 @@ def _gmail_message(*, message_id: str, url: str, title: str) -> dict[str, Any]:
         },
         "raw": raw,
     }
+
+
+class FakeGmailService:
+    def __init__(self) -> None:
+        self.profile_requested = False
+
+    def users(self) -> "FakeGmailService":
+        return self
+
+    def getProfile(self, *, userId: str) -> "FakeGmailService":
+        assert userId == "me"
+        self.profile_requested = True
+        self._response = {"emailAddress": "petromatch@example.com"}
+        return self
+
+    def messages(self) -> "FakeGmailService":
+        return self
+
+    def list(self, *, userId: str, q: str, maxResults: int) -> "FakeGmailService":
+        assert userId == "me"
+        assert q == "is:unread"
+        assert maxResults == 50
+        self._response = {"messages": [{"id": "message-1"}, {"id": "message-2"}], "resultSizeEstimate": 2}
+        return self
+
+    def list_next(self, request: Any, response: dict[str, Any]) -> None:
+        return None
+
+    def execute(self) -> dict[str, Any]:
+        return self._response
