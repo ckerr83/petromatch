@@ -17,7 +17,7 @@ class JobResponse(ORMModel):
     posted_date: date | None = None
     raw_text: str
     dedupe_fingerprint: str | None = None
-    processed_email_id: int
+    processed_email_id: int | None = None
     created_at: datetime
     updated_at: datetime
 

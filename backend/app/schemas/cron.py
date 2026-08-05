@@ -11,3 +11,6 @@ class DailyIngestionResponse(ORMModel):
     jobs_created: int
     duplicates_skipped: int
     errors: list[str]
+    gmail: dict[str, int] | None = None
+    airswift: dict[str, int] | None = None
+    sources: dict[str, dict[str, int]] | None = None

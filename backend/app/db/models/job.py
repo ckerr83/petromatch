@@ -20,8 +20,8 @@ class Job(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    processed_email_id: Mapped[int] = mapped_column(
-        ForeignKey("processed_emails.id", ondelete="CASCADE"), nullable=False, index=True
+    processed_email_id: Mapped[int | None] = mapped_column(
+        ForeignKey("processed_emails.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     source: Mapped[str] = mapped_column(String(64), nullable=False, index=True)

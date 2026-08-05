@@ -20,6 +20,7 @@ from app.services.daily_ingestion_service import DailyIngestionResult, DailyInge
 from app.services.extraction_service import ExtractionService
 from app.services.gmail_client import GmailClient, GmailCredentialsError, credentials_from_token_json
 from app.services.gmail_ingestion_service import GmailIngestionService
+from app.services.source_ingestion_service import SourceIngestionService
 
 
 class StubDailyIngestionService:
@@ -234,6 +235,7 @@ def _daily_service_with_messages(messages: dict[str, dict[str, Any]]) -> DailyIn
     return DailyIngestionService(
         gmail_ingestion_service=GmailIngestionService(gmail_client=FakeGmailClient(messages)),
         extraction_service=ExtractionService(),
+        source_ingestion_service=SourceIngestionService(sources=[]),
     )
 
 
