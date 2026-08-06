@@ -9,8 +9,12 @@
   ],
   "crons": [
     {
-      "path": "/api/v1/cron/daily-ingestion",
+      "path": "/api/v1/cron/gmail",
       "schedule": "0 23 * * *"
+    },
+    {
+      "path": "/api/v1/cron/airswift",
+      "schedule": "30 23 * * *"
     }
   ]
 }

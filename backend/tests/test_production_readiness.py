@@ -17,10 +17,10 @@ from app.db.base import Base
 from app.db.models import Job, ProcessedEmail
 from app.main import app
 from app.services.daily_ingestion_service import DailyIngestionResult, DailyIngestionService
-from app.services.extraction_service import ExtractionService
+from app.services.extraction_service import ExtractionResult, ExtractionService
 from app.services.gmail_client import GmailClient, GmailCredentialsError, credentials_from_token_json
-from app.services.gmail_ingestion_service import GmailIngestionService
-from app.services.source_ingestion_service import SourceIngestionService
+from app.services.gmail_ingestion_service import GmailIngestionResult, GmailIngestionService
+from app.services.source_ingestion_service import SourceIngestionResult, SourceIngestionService
 
 
 class StubDailyIngestionService:
@@ -54,6 +54,72 @@ class FakeGmailClient:
         return self.messages[message_id]["raw"]
 
 
+class StubGmailIngestionService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run_once(self, db: Session) -> GmailIngestionResult:
+        self.calls += 1
+        return GmailIngestionResult(
+            emails_discovered=2,
+            new_emails_stored=1,
+            duplicates_skipped=1,
+            failures=0,
+            errors=[],
+        )
+
+
+class StubExtractionService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run_pending(self, db: Session) -> ExtractionResult:
+        self.calls += 1
+        return ExtractionResult(
+            emails_processed=1,
+            emails_parsed=1,
+            emails_partially_parsed=0,
+            emails_failed=0,
+            emails_with_no_jobs=0,
+            jobs_found=1,
+            jobs_created=1,
+            duplicates_skipped=0,
+            errors=[],
+        )
+
+
+class StubAirswiftIngestionService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run_all(self, db: Session) -> list[SourceIngestionResult]:
+        self.calls += 1
+        return [
+            SourceIngestionResult(
+                source="airswift",
+                jobs_found=3,
+                jobs_created=2,
+                duplicates_skipped=1,
+                failures=0,
+                errors=[],
+                already_existing=1,
+                new_jobs_processed=2,
+                remaining_unprocessed_new_jobs=4,
+                stopped_due_to_budget=True,
+            )
+        ]
+
+
+class RaisingAirswiftIngestionService:
+    def run_all(self, db: Session) -> list[SourceIngestionResult]:
+        raise RuntimeError("airswift should not run")
+
+
+class RaisingGmailIngestionService:
+    def run_once(self, db: Session) -> GmailIngestionResult:
+        raise RuntimeError("gmail should not run")
+
+
 @pytest.fixture()
 def sqlite_session() -> Session:
     engine = create_engine("sqlite:///:memory:")
@@ -76,6 +142,9 @@ def client(sqlite_session: Session, monkeypatch: pytest.MonkeyPatch) -> TestClie
 
     stub = StubDailyIngestionService()
     monkeypatch.setattr(cron_routes, "daily_ingestion_service", stub)
+    monkeypatch.setattr(cron_routes, "gmail_ingestion_service", StubGmailIngestionService())
+    monkeypatch.setattr(cron_routes, "extraction_service", StubExtractionService())
+    monkeypatch.setattr(cron_routes, "airswift_ingestion_service", StubAirswiftIngestionService())
     app.dependency_overrides[get_db] = override_db
     try:
         yield TestClient(app)
@@ -108,6 +177,91 @@ def test_cron_endpoint_accepts_correct_secret(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["emails_found"] == 0
+
+
+def test_gmail_cron_rejects_missing_authorization(client: TestClient) -> None:
+    response = client.get("/api/v1/cron/gmail")
+
+    assert response.status_code == 401
+
+
+def test_gmail_cron_rejects_incorrect_secret(client: TestClient) -> None:
+    response = client.get("/api/v1/cron/gmail", headers={"Authorization": "Bearer wrong"})
+
+    assert response.status_code == 401
+
+
+def test_airswift_cron_rejects_missing_authorization(client: TestClient) -> None:
+    response = client.get("/api/v1/cron/airswift")
+
+    assert response.status_code == 401
+
+
+def test_airswift_cron_rejects_incorrect_secret(client: TestClient) -> None:
+    response = client.get("/api/v1/cron/airswift", headers={"Authorization": "Bearer wrong"})
+
+    assert response.status_code == 401
+
+
+def test_gmail_cron_does_not_run_airswift(client: TestClient) -> None:
+    response = client.get("/api/v1/cron/gmail", headers={"Authorization": "Bearer test-secret"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "emails_found": 2,
+        "emails_processed": 1,
+        "emails_skipped": 1,
+        "jobs_found": 1,
+        "jobs_created": 1,
+        "duplicates_skipped": 0,
+        "errors": [],
+    }
+    assert cron_routes.gmail_ingestion_service.calls == 1
+    assert cron_routes.extraction_service.calls == 1
+    assert cron_routes.airswift_ingestion_service.calls == 0
+
+
+def test_airswift_cron_does_not_run_gmail(client: TestClient) -> None:
+    response = client.get("/api/v1/cron/airswift", headers={"Authorization": "Bearer test-secret"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "jobs_discovered": 3,
+        "already_existing": 1,
+        "new_jobs_processed": 2,
+        "jobs_created": 2,
+        "failures": 0,
+        "remaining_unprocessed_new_jobs": 4,
+        "stopped_due_to_budget": True,
+        "errors": [],
+    }
+    assert cron_routes.airswift_ingestion_service.calls == 1
+    assert cron_routes.gmail_ingestion_service.calls == 0
+    assert cron_routes.extraction_service.calls == 0
+
+
+def test_gmail_cron_still_succeeds_if_airswift_service_is_broken(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cron_routes, "airswift_ingestion_service", RaisingAirswiftIngestionService())
+
+    response = client.get("/api/v1/cron/gmail", headers={"Authorization": "Bearer test-secret"})
+
+    assert response.status_code == 200
+    assert response.json()["jobs_created"] == 1
+
+
+def test_airswift_cron_still_succeeds_if_gmail_service_is_broken(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cron_routes, "gmail_ingestion_service", RaisingGmailIngestionService())
+
+    response = client.get("/api/v1/cron/airswift", headers={"Authorization": "Bearer test-secret"})
+
+    assert response.status_code == 200
+    assert response.json()["jobs_created"] == 2
 
 
 def test_daily_ingestion_is_idempotent_for_identical_gmail_messages(sqlite_session: Session) -> None:

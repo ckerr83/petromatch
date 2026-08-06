@@ -209,19 +209,21 @@ If Google revokes or expires the refresh token, run the local OAuth flow again w
 
 ## F. Vercel Cron
 
-Cron path:
+Cron paths:
 
 ```text
-GET /api/v1/cron/daily-ingestion
+GET /api/v1/cron/gmail
+GET /api/v1/cron/airswift
 ```
 
-Schedule:
+Schedules:
 
 ```text
-0 23 * * *
+0 23 * * *   /api/v1/cron/gmail
+30 23 * * *  /api/v1/cron/airswift
 ```
 
-This is 23:00 UTC, approximately 06:00 Thailand time the following morning. On the Vercel Hobby plan, daily cron jobs may run at some point within the scheduled hour rather than exactly at minute zero.
+This starts at 23:00 UTC, approximately 06:00 Thailand time the following morning. On the Vercel Hobby plan, daily cron jobs may run at some point within the scheduled hour rather than exactly at minute zero.
 
 Vercel sends:
 
@@ -231,6 +233,14 @@ Authorization: Bearer <CRON_SECRET>
 
 Set `CRON_SECRET` in the backend Vercel project. Check Vercel logs after the scheduled execution.
 
+Legacy compatibility path:
+
+```text
+GET /api/v1/cron/daily-ingestion
+```
+
+This still runs Gmail and Airswift sequentially, but new scheduling should use the source-specific endpoints above.
+
 ## G. Manual Testing
 
 Health check:
@@ -239,18 +249,26 @@ Health check:
 curl https://<api-domain>/health
 ```
 
-Authorized cron test:
+Authorized Gmail cron test:
 
 ```bash
 curl \
   -H "Authorization: Bearer <CRON_SECRET>" \
-  https://<api-domain>/api/v1/cron/daily-ingestion
+  https://<api-domain>/api/v1/cron/gmail
+```
+
+Authorized Airswift cron test:
+
+```bash
+curl \
+  -H "Authorization: Bearer <CRON_SECRET>" \
+  https://<api-domain>/api/v1/cron/airswift
 ```
 
 Unauthorized cron test:
 
 ```bash
-curl -i https://<api-domain>/api/v1/cron/daily-ingestion
+curl -i https://<api-domain>/api/v1/cron/gmail
 ```
 
 List jobs:
@@ -259,12 +277,16 @@ List jobs:
 curl https://<api-domain>/api/v1/jobs
 ```
 
-Local cron test:
+Local cron tests:
 
 ```bash
 curl \
   -H "Authorization: Bearer <CRON_SECRET>" \
-  http://localhost:8000/api/v1/cron/daily-ingestion
+  http://localhost:8000/api/v1/cron/gmail
+
+curl \
+  -H "Authorization: Bearer <CRON_SECRET>" \
+  http://localhost:8000/api/v1/cron/airswift
 ```
 
 ## H. Rollback and Recovery
@@ -292,7 +314,11 @@ Rerun ingestion safely:
 ```bash
 curl \
   -H "Authorization: Bearer <CRON_SECRET>" \
-  https://<api-domain>/api/v1/cron/daily-ingestion
+  https://<api-domain>/api/v1/cron/gmail
+
+curl \
+  -H "Authorization: Bearer <CRON_SECRET>" \
+  https://<api-domain>/api/v1/cron/airswift
 ```
 
 The ingestion pipeline is idempotent: already processed Gmail message IDs are skipped, and duplicate jobs are skipped by URL, external ID, or conservative fingerprint.
