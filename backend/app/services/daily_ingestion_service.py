@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -22,8 +23,8 @@ class DailyIngestionResult:
     duplicates_skipped: int
     errors: list[str]
     gmail: dict[str, int] | None = None
-    airswift: dict[str, int] | None = None
-    sources: dict[str, dict[str, int]] | None = None
+    airswift: dict[str, Any] | None = None
+    sources: dict[str, dict[str, Any]] | None = None
 
 
 class DailyIngestionService:
@@ -84,12 +85,18 @@ class DailyIngestionService:
         return result
 
 
-def _source_summary(source_results: list[SourceIngestionResult]) -> dict[str, dict[str, int]]:
+def _source_summary(source_results: list[SourceIngestionResult]) -> dict[str, dict[str, Any]]:
     return {
         source_result.source: {
             "jobs_found": source_result.jobs_found,
+            "jobs_discovered": source_result.jobs_found,
+            "already_existing": source_result.already_existing,
+            "new_jobs_processed": source_result.new_jobs_processed,
             "jobs_created": source_result.jobs_created,
             "duplicates_skipped": source_result.duplicates_skipped,
+            "failures": source_result.failures,
+            "remaining_unprocessed_new_jobs": source_result.remaining_unprocessed_new_jobs,
+            "stopped_due_to_budget": source_result.stopped_due_to_budget,
         }
         for source_result in source_results
     }

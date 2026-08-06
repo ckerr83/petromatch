@@ -34,12 +34,16 @@ class GmailClient:
         self.google_client_secret = (
             google_client_secret if google_client_secret is not None else settings.google_client_secret
         )
+        self._service: Any | None = None
 
     def build_service(self) -> Any:
+        if self._service is not None:
+            return self._service
         credentials = self._load_credentials()
         from googleapiclient.discovery import build
 
-        return build("gmail", "v1", credentials=credentials)
+        self._service = build("gmail", "v1", credentials=credentials)
+        return self._service
 
     def list_message_ids(self, *, query: str, max_results: int) -> list[str]:
         service = self.build_service()

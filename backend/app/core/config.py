@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     db_pool_size: int = Field(default=1, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=2, alias="DB_MAX_OVERFLOW")
     db_pool_recycle_seconds: int = Field(default=300, alias="DB_POOL_RECYCLE_SECONDS")
+    airswift_max_new_jobs_per_run: int = Field(default=40, alias="AIRSWIFT_MAX_NEW_JOBS_PER_RUN")
+    airswift_time_budget_seconds: float = Field(default=170.0, alias="AIRSWIFT_TIME_BUDGET_SECONDS")
 
     @property
     def allowed_origin_list(self) -> list[str]:

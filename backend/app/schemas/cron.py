@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.schemas.common import ORMModel
 
 
@@ -12,5 +14,5 @@ class DailyIngestionResponse(ORMModel):
     duplicates_skipped: int
     errors: list[str]
     gmail: dict[str, int] | None = None
-    airswift: dict[str, int] | None = None
-    sources: dict[str, dict[str, int]] | None = None
+    airswift: dict[str, Any] | None = None
+    sources: dict[str, dict[str, Any]] | None = None

@@ -157,6 +157,145 @@ def test_gmail_still_succeeds_if_airswift_fails() -> None:
     assert result.errors
 
 
+def test_airswift_initial_backlog_larger_than_batch_limit_processes_only_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _configure_airswift_budget(monkeypatch, max_new_jobs=2)
+    db = _session()
+    source = CountingSource(
+        [
+            _source_job("1", "https://www.airswift.com/jobs/detail-1"),
+            _source_job("2", "https://www.airswift.com/jobs/detail-2"),
+            _source_job("3", "https://www.airswift.com/jobs/detail-3"),
+        ]
+    )
+
+    result = SourceIngestionService(sources=[source]).run_source(db, source)
+
+    assert result.jobs_found == 3
+    assert result.new_jobs_processed == 2
+    assert result.jobs_created == 2
+    assert result.remaining_unprocessed_new_jobs == 1
+    assert result.stopped_due_to_budget is True
+    assert source.enriched_external_ids == ["1", "2"]
+
+
+def test_airswift_second_run_continues_remaining_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_airswift_budget(monkeypatch, max_new_jobs=2)
+    db = _session()
+    source = CountingSource(
+        [
+            _source_job("1", "https://www.airswift.com/jobs/detail-1"),
+            _source_job("2", "https://www.airswift.com/jobs/detail-2"),
+            _source_job("3", "https://www.airswift.com/jobs/detail-3"),
+        ]
+    )
+    service = SourceIngestionService(sources=[source])
+
+    first = service.run_source(db, source)
+    db.commit()
+    source.enriched_external_ids.clear()
+    second = service.run_source(db, source)
+    db.commit()
+
+    assert first.jobs_created == 2
+    assert second.already_existing == 2
+    assert second.new_jobs_processed == 1
+    assert second.jobs_created == 1
+    assert second.remaining_unprocessed_new_jobs == 0
+    assert source.enriched_external_ids == ["3"]
+    assert len(db.scalars(select(Job)).all()) == 3
+
+
+def test_existing_airswift_jobs_do_not_trigger_detail_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_airswift_budget(monkeypatch, max_new_jobs=10)
+    db = _session()
+    existing = _job_from_source_for_test(_source_job("1", "https://www.airswift.com/jobs/detail-1"))
+    db.add(existing)
+    db.commit()
+    source = CountingSource([_source_job("1", "https://www.airswift.com/jobs/detail-1")])
+
+    result = SourceIngestionService(sources=[source]).run_source(db, source)
+
+    assert result.already_existing == 1
+    assert result.new_jobs_processed == 0
+    assert result.jobs_created == 0
+    assert source.enriched_external_ids == []
+
+
+def test_airswift_detail_failure_does_not_abort_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_airswift_budget(monkeypatch, max_new_jobs=10)
+    db = _session()
+    source = CountingSource(
+        [
+            _source_job("1", "https://www.airswift.com/jobs/detail-1"),
+            _source_job("2", "https://www.airswift.com/jobs/detail-2"),
+        ],
+        failing_external_ids={"1"},
+    )
+
+    result = SourceIngestionService(sources=[source]).run_source(db, source)
+
+    assert result.failures == 1
+    assert result.jobs_created == 1
+    assert result.errors
+    assert len(db.scalars(select(Job)).all()) == 1
+
+
+def test_daily_execution_with_airswift_batch_limit_keeps_gmail_working(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_airswift_budget(monkeypatch, max_new_jobs=1)
+    db = _session()
+    email = ProcessedEmail(
+        gmail_message_id="gmail-1",
+        source="gmail",
+        sender="jobs-listings@linkedin.com",
+        recipients=["candidate@example.com"],
+        subject="LinkedIn job alert",
+        received_date=datetime(2026, 8, 5, 10, 0, tzinfo=UTC),
+        raw_html_body='<a href="https://www.linkedin.com/jobs/view/1234567890/">Senior Engineer</a><span>PetroCo · Houston, TX</span>',
+        status="ingested",
+        extraction_status="pending",
+    )
+    db.add(email)
+    db.commit()
+    source = CountingSource(
+        [
+            _source_job("1", "https://www.airswift.com/jobs/detail-1"),
+            _source_job("2", "https://www.airswift.com/jobs/detail-2"),
+        ]
+    )
+    service = DailyIngestionService(
+        gmail_ingestion_service=EmptyGmailIngestionService(),
+        extraction_service=ExtractionService(),
+        source_ingestion_service=SourceIngestionService(sources=[source]),
+    )
+
+    result = service.run_once(db)
+
+    assert result.gmail["jobs_created"] == 1
+    assert result.airswift["new_jobs_processed"] == 1
+    assert result.airswift["remaining_unprocessed_new_jobs"] == 1
+    assert result.jobs_created == 2
+
+
+def test_airswift_repeated_runs_remain_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_airswift_budget(monkeypatch, max_new_jobs=10)
+    db = _session()
+    source = CountingSource([_source_job("1", "https://www.airswift.com/jobs/detail-1")])
+    service = SourceIngestionService(sources=[source])
+
+    first = service.run_source(db, source)
+    db.commit()
+    second = service.run_source(db, source)
+    db.commit()
+
+    assert first.jobs_created == 1
+    assert second.jobs_created == 0
+    assert second.already_existing == 1
+    assert second.new_jobs_processed == 0
+    assert len(db.scalars(select(Job)).all()) == 1
+
+
 class StaticSource(SourceAdapter):
     source = "airswift"
     display_name = "Airswift"
@@ -187,17 +326,61 @@ class EmptyGmailIngestionService:
         )
 
 
+class CountingSource(SourceAdapter):
+    source = "airswift"
+    display_name = "Airswift"
+
+    def __init__(self, jobs: list[SourceJob], failing_external_ids: set[str] | None = None) -> None:
+        self.jobs = jobs
+        self.failing_external_ids = failing_external_ids or set()
+        self.enriched_external_ids: list[str] = []
+
+    def fetch_jobs(self) -> list[SourceJob]:
+        return self.jobs
+
+    def enrich_job(self, job: SourceJob) -> SourceJob:
+        self.enriched_external_ids.append(job.external_id)
+        if job.external_id in self.failing_external_ids:
+            raise RuntimeError("detail unavailable")
+        return job
+
+
 def _source_job(external_id: str, url: str) -> SourceJob:
     return SourceJob(
         source="airswift",
         external_id=external_id,
-        title="Senior Subsea Structural Engineer",
+        title=f"Senior Subsea Structural Engineer {external_id}",
         company="Airswift",
         location="Kuala Lumpur, Malaysia",
         url=url,
-        description="About The Job Responsibilities of Role.",
+        description=f"About The Job Responsibilities of Role {external_id}.",
         source_reference=external_id,
     )
+
+
+def _job_from_source_for_test(source_job: SourceJob) -> Job:
+    return Job(
+        processed_email_id=None,
+        source=source_job.source,
+        external_id=source_job.external_id,
+        job_url=source_job.url,
+        dedupe_fingerprint=None,
+        job_title=source_job.title,
+        company=source_job.company,
+        location=source_job.location,
+        posted_date=source_job.posted_date,
+        received_date=datetime.now(UTC),
+        raw_text=source_job.description,
+        source_payload={},
+    )
+
+
+def _configure_airswift_budget(monkeypatch: pytest.MonkeyPatch, *, max_new_jobs: int) -> None:
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("AIRSWIFT_MAX_NEW_JOBS_PER_RUN", str(max_new_jobs))
+    monkeypatch.setenv("AIRSWIFT_TIME_BUDGET_SECONDS", "170")
+    get_settings.cache_clear()
 
 
 LISTING_PAGE_1 = """

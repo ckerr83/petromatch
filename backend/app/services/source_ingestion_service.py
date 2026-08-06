@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.models import IngestionRun, Job
 from app.sources import AirswiftSource, SourceAdapter, SourceJob
@@ -23,6 +25,10 @@ class SourceIngestionResult:
     duplicates_skipped: int
     failures: int
     errors: list[str]
+    already_existing: int = 0
+    new_jobs_processed: int = 0
+    remaining_unprocessed_new_jobs: int = 0
+    stopped_due_to_budget: bool = False
 
 
 class SourceIngestionService:
@@ -41,20 +47,51 @@ class SourceIngestionService:
         jobs_created = 0
         duplicates_skipped = 0
         failures = 0
+        already_existing = 0
+        new_jobs_processed = 0
+        remaining_unprocessed_new_jobs = 0
+        stopped_due_to_budget = False
         errors: list[str] = []
 
         try:
             logger.info("source_ingestion_started", source=source.source)
             source_jobs = source.fetch_jobs()
             jobs_found = len(source_jobs)
+            new_source_jobs: list[SourceJob] = []
             for source_job in source_jobs:
+                if self._is_duplicate(db, source_job):
+                    duplicates_skipped += 1
+                    already_existing += 1
+                    continue
+                new_source_jobs.append(source_job)
+
+            max_new_jobs = _max_new_jobs_for_source(source.source)
+            time_budget_seconds = _time_budget_for_source(source.source)
+            deadline = time.monotonic() + time_budget_seconds if time_budget_seconds else None
+            remaining_unprocessed_new_jobs = max(0, len(new_source_jobs) - max_new_jobs)
+            limited_source_jobs = new_source_jobs[:max_new_jobs]
+            if len(new_source_jobs) > len(limited_source_jobs):
+                stopped_due_to_budget = True
+
+            for source_job in limited_source_jobs:
+                if deadline is not None and time.monotonic() >= deadline:
+                    stopped_due_to_budget = True
+                    remaining_unprocessed_new_jobs = len(limited_source_jobs) - new_jobs_processed + max(
+                        0, len(new_source_jobs) - len(limited_source_jobs)
+                    )
+                    logger.info(
+                        "source_ingestion_time_budget_reached",
+                        source=source.source,
+                        new_jobs_processed=new_jobs_processed,
+                        remaining_unprocessed_new_jobs=remaining_unprocessed_new_jobs,
+                    )
+                    break
                 try:
-                    if self._is_duplicate(db, source_job):
-                        duplicates_skipped += 1
-                        continue
                     source_job = source.enrich_job(source_job)
+                    new_jobs_processed += 1
                     if self._is_duplicate(db, source_job):
                         duplicates_skipped += 1
+                        already_existing += 1
                         continue
                     db.add(_job_from_source(source_job))
                     db.flush()
@@ -85,9 +122,13 @@ class SourceIngestionService:
                 "source_ingestion_completed",
                 source=source.source,
                 jobs_found=jobs_found,
+                already_existing=already_existing,
+                new_jobs_processed=new_jobs_processed,
                 jobs_created=jobs_created,
                 duplicates_skipped=duplicates_skipped,
                 failures=failures,
+                remaining_unprocessed_new_jobs=remaining_unprocessed_new_jobs,
+                stopped_due_to_budget=stopped_due_to_budget,
             )
 
         return SourceIngestionResult(
@@ -97,6 +138,10 @@ class SourceIngestionService:
             duplicates_skipped=duplicates_skipped,
             failures=failures,
             errors=errors,
+            already_existing=already_existing,
+            new_jobs_processed=new_jobs_processed,
+            remaining_unprocessed_new_jobs=remaining_unprocessed_new_jobs,
+            stopped_due_to_budget=stopped_due_to_budget,
         )
 
     def _is_duplicate(self, db: Session, source_job: SourceJob) -> bool:
@@ -138,3 +183,17 @@ def _job_from_source(source_job: SourceJob) -> Job:
             "raw_metadata": source_job.raw_metadata,
         },
     )
+
+
+def _max_new_jobs_for_source(source: str) -> int:
+    settings = get_settings()
+    if source == "airswift":
+        return max(0, settings.airswift_max_new_jobs_per_run)
+    return 10_000
+
+
+def _time_budget_for_source(source: str) -> float | None:
+    settings = get_settings()
+    if source == "airswift":
+        return max(0.0, settings.airswift_time_budget_seconds)
+    return None
