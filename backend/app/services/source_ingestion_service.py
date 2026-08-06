@@ -52,6 +52,7 @@ class SourceIngestionService:
         remaining_unprocessed_new_jobs = 0
         stopped_due_to_budget = False
         errors: list[str] = []
+        run_recorded_after_rollback = False
 
         try:
             logger.info("source_ingestion_started", source=source.source)
@@ -110,14 +111,27 @@ class SourceIngestionService:
         except Exception as exc:  # noqa: BLE001
             failures += 1
             errors.append(f"source={source.source}: {type(exc).__name__}: {exc}")
-            run.status = "failed"
-            run.error_summary = str(exc)
+            db.rollback()
+            jobs_created = 0
+            run = IngestionRun(
+                source=source.source,
+                status="failed",
+                error_summary=str(exc),
+                jobs_created=jobs_created,
+                jobs_skipped_duplicate=duplicates_skipped,
+                jobs_failed=failures,
+                finished_at=datetime.now(UTC),
+            )
+            db.add(run)
+            db.flush()
+            run_recorded_after_rollback = True
             logger.warning("source_ingestion_failed", source=source.source, error=str(exc))
         finally:
-            run.jobs_created = jobs_created
-            run.jobs_skipped_duplicate = duplicates_skipped
-            run.jobs_failed = failures
-            run.finished_at = datetime.now(UTC)
+            if not run_recorded_after_rollback:
+                run.jobs_created = jobs_created
+                run.jobs_skipped_duplicate = duplicates_skipped
+                run.jobs_failed = failures
+                run.finished_at = datetime.now(UTC)
             logger.info(
                 "source_ingestion_completed",
                 source=source.source,

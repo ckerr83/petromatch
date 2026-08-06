@@ -42,6 +42,7 @@ class GmailIngestionService:
         skipped = 0
         failures = 0
         errors: list[str] = []
+        run_recorded_after_rollback = False
 
         try:
             logger.info("gmail_ingestion_started", query=settings.gmail_query, max_results=settings.gmail_max_results)
@@ -67,39 +68,57 @@ class GmailIngestionService:
 
                 try:
                     email_record = self._fetch_and_build_record(message_id)
-                    db.add(email_record)
-                    db.flush()
+                    with db.begin_nested():
+                        db.add(email_record)
+                        db.flush()
                     stored += 1
                 except Exception as exc:  # noqa: BLE001
                     error = f"message_id={message_id}: {type(exc).__name__}: {exc}"
                     errors.append(error)
                     logger.warning("gmail_message_ingestion_failed", message_id=message_id, error=str(exc))
-                    db.add(
-                        ProcessedEmail(
-                            gmail_message_id=message_id,
-                            status="failed",
-                            recipients=[],
-                            error_summary=str(exc),
+                    with db.begin_nested():
+                        db.add(
+                            ProcessedEmail(
+                                gmail_message_id=message_id,
+                                status="failed",
+                                recipients=[],
+                                error_summary=str(exc),
+                            )
                         )
-                    )
-                    db.flush()
+                        db.flush()
                     failures += 1
 
             run.status = "completed" if failures == 0 else "completed_with_errors"
         except Exception as exc:  # noqa: BLE001
             failures += 1
             errors.append(f"{type(exc).__name__}: {exc}")
-            run.status = "failed"
-            run.error_summary = str(exc)
+            db.rollback()
+            stored = 0
+            run = IngestionRun(
+                source="gmail",
+                status="failed",
+                emails_seen=discovered,
+                emails_processed=stored,
+                emails_skipped=skipped,
+                jobs_created=0,
+                jobs_skipped_duplicate=0,
+                jobs_failed=0,
+                error_summary=str(exc),
+                finished_at=datetime.now(UTC),
+            )
+            db.add(run)
+            db.flush()
+            run_recorded_after_rollback = True
             logger.error("gmail_ingestion_failed", error=str(exc))
         finally:
-            run.emails_seen = discovered
-            run.emails_processed = stored
-            run.emails_skipped = skipped
-            run.jobs_created = 0
-            run.jobs_skipped_duplicate = 0
-            run.jobs_failed = 0
-            run.finished_at = datetime.now(UTC)
+            if not run_recorded_after_rollback:
+                run.emails_seen = discovered
+                run.emails_processed = stored
+                run.emails_skipped = skipped
+                run.jobs_created = 0
+                run.jobs_skipped_duplicate = 0
+                run.jobs_failed = 0
+                run.finished_at = datetime.now(UTC)
             logger.info(
                 "gmail_ingestion_completed",
                 emails_discovered=discovered,

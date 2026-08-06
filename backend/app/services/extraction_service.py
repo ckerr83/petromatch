@@ -159,6 +159,10 @@ class ExtractionService:
         except Exception as exc:  # noqa: BLE001
             error = f"email_id={email.id}: {type(exc).__name__}: {exc}"
             errors.append(error)
+            email_id = email.id
+            if not db.is_active:
+                db.rollback()
+                email = db.get(ProcessedEmail, email_id) or email
             email.extraction_status = "failed"
             email.parsing_error = str(exc)
             email.parsed_at = datetime.now(UTC)
